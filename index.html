@@ -1,0 +1,2163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sharp PC-1211 BASIC Simulator</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  color: #ccc;
+}
+#emulator {
+  background: linear-gradient(145deg, #2a2a3a, #1e1e2e);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  width: 620px;
+}
+#lcd-container {
+  background: #1a2a1a;
+  border: 2px solid #333;
+  border-radius: 8px;
+  padding: 12px 16px 8px;
+  margin-bottom: 16px;
+}
+#indicators {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-family: 'Courier New', monospace;
+  height: 14px;
+}
+.indicator { color: #1a3a1a; transition: color 0.15s; }
+.indicator.active { color: #4a4; }
+#lcd { display: block; image-rendering: pixelated; }
+#keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.kb-row {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+.key {
+  background: linear-gradient(180deg, #444, #333);
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #ddd;
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 34px;
+  padding: 2px 4px;
+  user-select: none;
+  position: relative;
+}
+.key:active, .key.pressed { background: linear-gradient(180deg, #555, #666); border-color: #777; }
+.key .shift-label {
+  font-size: 8px;
+  color: #f90;
+  position: absolute;
+  top: 1px;
+  right: 3px;
+}
+.key.wide { min-width: 58px; }
+.key.wider { min-width: 78px; }
+.key.special { background: linear-gradient(180deg, #c44, #a33); border-color: #d55; }
+.key.mode-key { background: linear-gradient(180deg, #448, #336); border-color: #55a; }
+.key.enter-key { background: linear-gradient(180deg, #484, #363); border-color: #5a5; min-width: 68px; }
+.key.shift-key { background: linear-gradient(180deg, #864, #643); border-color: #a86; }
+.key.shift-key.active { background: linear-gradient(180deg, #fa0, #c80); color: #000; }
+</style>
+</head>
+<body>
+<div id="emulator">
+  <div id="lcd-container">
+    <div id="indicators">
+      <span class="indicator" id="ind-shift">SHIFT</span>
+      <span class="indicator" id="ind-def">DEF</span>
+      <span class="indicator" id="ind-pro">PRO</span>
+      <span class="indicator" id="ind-run">RUN</span>
+      <span class="indicator" id="ind-reserve">RESERVE</span>
+      <span class="indicator" id="ind-deg">DEG</span>
+      <span class="indicator" id="ind-rad">RAD</span>
+      <span class="indicator" id="ind-grad">GRAD</span>
+    </div>
+    <canvas id="lcd" width="576" height="36"></canvas>
+  </div>
+  <div id="keyboard"></div>
+</div>
+
+<script>
+"use strict";
+
+// ===== PC-1211 5x7 Font ROM (1280 bytes) =====
+// Each character is 5 bytes (5 columns), each byte has 7 bits (LSB=top row)
+// Columns are drawn right-to-left: byte0=rightmost column
+const FONT_ROM = [
+// 0x00-0x0F (control chars - blank)
+0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+// 0x10-0x1F
+0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+// 0x18 = SQR symbol (√)
+0x10,0x20,0x1C,0x03,0x01,
+// 0x19 = PI symbol (π)
+0x42,0x3E,0x02,0x3E,0x02,
+// 0x1A-0x1F
+0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+// 0x20 = space
+0,0,0,0,0,
+// 0x21 = !
+0x00,0x00,0x5F,0x00,0x00,
+// 0x22 = "
+0x00,0x03,0x00,0x03,0x00,
+// 0x23 = #
+0x14,0x7F,0x14,0x7F,0x14,
+// 0x24 = $
+0x24,0x2A,0x7F,0x2A,0x12,
+// 0x25 = %
+0x23,0x13,0x08,0x64,0x62,
+// 0x26 = &
+0x36,0x49,0x55,0x22,0x50,
+// 0x27 = '
+0x00,0x00,0x03,0x00,0x00,
+// 0x28 = (
+0x00,0x1C,0x22,0x41,0x00,
+// 0x29 = )
+0x00,0x41,0x22,0x1C,0x00,
+// 0x2A = *
+0x14,0x08,0x3E,0x08,0x14,
+// 0x2B = +
+0x08,0x08,0x3E,0x08,0x08,
+// 0x2C = ,
+0x00,0x50,0x30,0x00,0x00,
+// 0x2D = -
+0x08,0x08,0x08,0x08,0x08,
+// 0x2E = .
+0x00,0x60,0x60,0x00,0x00,
+// 0x2F = /
+0x20,0x10,0x08,0x04,0x02,
+// 0x30 = 0
+0x3E,0x51,0x49,0x45,0x3E,
+// 0x31 = 1
+0x00,0x42,0x7F,0x40,0x00,
+// 0x32 = 2
+0x42,0x61,0x51,0x49,0x46,
+// 0x33 = 3
+0x21,0x41,0x45,0x4B,0x31,
+// 0x34 = 4
+0x18,0x14,0x12,0x7F,0x10,
+// 0x35 = 5
+0x27,0x45,0x45,0x45,0x39,
+// 0x36 = 6
+0x3C,0x4A,0x49,0x49,0x30,
+// 0x37 = 7
+0x01,0x71,0x09,0x05,0x03,
+// 0x38 = 8
+0x36,0x49,0x49,0x49,0x36,
+// 0x39 = 9
+0x06,0x49,0x49,0x29,0x1E,
+// 0x3A = :
+0x00,0x36,0x36,0x00,0x00,
+// 0x3B = ;
+0x00,0x56,0x36,0x00,0x00,
+// 0x3C = <
+0x08,0x14,0x22,0x41,0x00,
+// 0x3D = =
+0x14,0x14,0x14,0x14,0x14,
+// 0x3E = >
+0x00,0x41,0x22,0x14,0x08,
+// 0x3F = ?
+0x02,0x01,0x51,0x09,0x06,
+// 0x40 = @
+0x3E,0x41,0x5D,0x55,0x2E,
+// 0x41 = A
+0x7E,0x09,0x09,0x09,0x7E,
+// 0x42 = B
+0x7F,0x49,0x49,0x49,0x36,
+// 0x43 = C
+0x3E,0x41,0x41,0x41,0x22,
+// 0x44 = D
+0x7F,0x41,0x41,0x41,0x3E,
+// 0x45 = E
+0x7F,0x49,0x49,0x49,0x41,
+// 0x46 = F
+0x7F,0x09,0x09,0x09,0x01,
+// 0x47 = G
+0x3E,0x41,0x49,0x49,0x7A,
+// 0x48 = H
+0x7F,0x08,0x08,0x08,0x7F,
+// 0x49 = I
+0x00,0x41,0x7F,0x41,0x00,
+// 0x4A = J
+0x20,0x40,0x41,0x3F,0x01,
+// 0x4B = K
+0x7F,0x08,0x14,0x22,0x41,
+// 0x4C = L
+0x7F,0x40,0x40,0x40,0x40,
+// 0x4D = M
+0x7F,0x02,0x0C,0x02,0x7F,
+// 0x4E = N
+0x7F,0x04,0x08,0x10,0x7F,
+// 0x4F = O
+0x3E,0x41,0x41,0x41,0x3E,
+// 0x50 = P
+0x7F,0x09,0x09,0x09,0x06,
+// 0x51 = Q
+0x3E,0x41,0x51,0x21,0x5E,
+// 0x52 = R
+0x7F,0x09,0x19,0x29,0x46,
+// 0x53 = S
+0x26,0x49,0x49,0x49,0x32,
+// 0x54 = T
+0x01,0x01,0x7F,0x01,0x01,
+// 0x55 = U
+0x3F,0x40,0x40,0x40,0x3F,
+// 0x56 = V
+0x1F,0x20,0x40,0x20,0x1F,
+// 0x57 = W
+0x3F,0x40,0x38,0x40,0x3F,
+// 0x58 = X
+0x63,0x14,0x08,0x14,0x63,
+// 0x59 = Y
+0x07,0x08,0x70,0x08,0x07,
+// 0x5A = Z
+0x61,0x51,0x49,0x45,0x43,
+// 0x5B = [
+0x00,0x7F,0x41,0x41,0x00,
+// 0x5C = backslash
+0x02,0x04,0x08,0x10,0x20,
+// 0x5D = ]
+0x00,0x41,0x41,0x7F,0x00,
+// 0x5E = ^
+0x04,0x02,0x01,0x02,0x04,
+// 0x5F = _
+0x40,0x40,0x40,0x40,0x40,
+// 0x60 = `
+0x00,0x01,0x02,0x00,0x00,
+// 0x61-0x7A = lowercase (same as uppercase on PC-1211)
+0x7E,0x09,0x09,0x09,0x7E, // a=A
+0x7F,0x49,0x49,0x49,0x36, // b=B
+0x3E,0x41,0x41,0x41,0x22, // c=C
+0x7F,0x41,0x41,0x41,0x3E, // d=D
+0x7F,0x49,0x49,0x49,0x41, // e=E
+0x7F,0x09,0x09,0x09,0x01, // f=F
+0x3E,0x41,0x49,0x49,0x7A, // g=G
+0x7F,0x08,0x08,0x08,0x7F, // h=H
+0x00,0x41,0x7F,0x41,0x00, // i=I
+0x20,0x40,0x41,0x3F,0x01, // j=J
+0x7F,0x08,0x14,0x22,0x41, // k=K
+0x7F,0x40,0x40,0x40,0x40, // l=L
+0x7F,0x02,0x0C,0x02,0x7F, // m=M
+0x7F,0x04,0x08,0x10,0x7F, // n=N
+0x3E,0x41,0x41,0x41,0x3E, // o=O
+0x7F,0x09,0x09,0x09,0x06, // p=P
+0x3E,0x41,0x51,0x21,0x5E, // q=Q
+0x7F,0x09,0x19,0x29,0x46, // r=R
+0x26,0x49,0x49,0x49,0x32, // s=S
+0x01,0x01,0x7F,0x01,0x01, // t=T
+0x3F,0x40,0x40,0x40,0x3F, // u=U
+0x1F,0x20,0x40,0x20,0x1F, // v=V
+0x3F,0x40,0x38,0x40,0x3F, // w=W
+0x63,0x14,0x08,0x14,0x63, // x=X
+0x07,0x08,0x70,0x08,0x07, // y=Y
+0x61,0x51,0x49,0x45,0x43, // z=Z
+// 0x7B = {
+0x00,0x08,0x36,0x41,0x00,
+// 0x7C = |
+0x00,0x00,0x7F,0x00,0x00,
+// 0x7D = }
+0x00,0x41,0x36,0x08,0x00,
+// 0x7E = ~
+0x08,0x04,0x08,0x10,0x08,
+// 0x7F = block cursor
+0x7F,0x7F,0x7F,0x7F,0x7F,
+];
+
+// ===== LCD Class =====
+class LCD {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.cols = 24;
+    this.pixelSize = 3;
+    this.pixelGap = 1;
+    this.cellW = 6; // 5 cols + 1 gap
+    this.cellH = 7;
+    // Resize canvas to fit
+    this.canvas.width = this.cols * this.cellW * (this.pixelSize + this.pixelGap);
+    this.canvas.height = this.cellH * (this.pixelSize + this.pixelGap) + 2;
+    this.onColor = '#4a4';
+    this.dimColor = '#1a2a1a';
+    this.blinkOn = true;
+    this.blinkTimer = 0;
+    this.blinkInterval = 500;
+  }
+
+  drawChar(charCode, col) {
+    const px = this.pixelSize;
+    const gap = this.pixelGap;
+    const step = px + gap;
+    const x0 = col * this.cellW * step;
+    charCode = charCode & 0x7F;
+    if (charCode * 5 + 4 >= FONT_ROM.length) charCode = 0;
+    for (let c = 0; c < 5; c++) {
+      const data = FONT_ROM[charCode * 5 + c];
+      // Columns drawn left-to-right: col 0 = leftmost
+      const xPx = x0 + c * step;
+      for (let r = 0; r < 7; r++) {
+        const on = (data >> r) & 1;
+        this.ctx.fillStyle = on ? this.onColor : this.dimColor;
+        this.ctx.fillRect(xPx, r * step + 1, px, px);
+      }
+    }
+  }
+
+  render(displayChars, cursorPos, cursorVisible) {
+    this.ctx.fillStyle = '#0a150a';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    for (let i = 0; i < this.cols; i++) {
+      const ch = i < displayChars.length ? displayChars[i] : 0x20;
+      if (i === cursorPos && cursorVisible && this.blinkOn) {
+        this.drawChar(0x7F, i); // block cursor
+      } else {
+        this.drawChar(ch, i);
+      }
+    }
+  }
+
+  updateBlink(dt) {
+    this.blinkTimer += dt;
+    if (this.blinkTimer >= this.blinkInterval) {
+      this.blinkTimer -= this.blinkInterval;
+      this.blinkOn = !this.blinkOn;
+    }
+  }
+}
+
+// ===== BASIC Keyword Tables =====
+const KEYWORDS = [
+  'BEEP','BYE','INPUT','IF','FOR','GOTO','GOSUB',
+  'LIST','LET','LOAD','MEM','NEXT','NEW','PRINT',
+  'PAUSE','POKE','RUN','RETURN','REM','STOP',
+  'SAVE','USING','FILES','?',"'",'DWRITE',
+  'PINMODE','DELAY','END','RSEED','CHAIN',
+  'RADIAN','DEGREE','GRAD','TO','STEP',
+  // Functions start at index 36 (0x24)
+  'SIN','COS','TAN','ASN','ACS','ATN','LN','LOG',
+  'EXP','PEEK','ABS','AREAD','DREAD','RND','SGN','INT',
+  'DEG','DMS','SQR'
+];
+
+// Token values: 0x80 + index
+const KW = {};
+KEYWORDS.forEach((k, i) => KW['KW_' + k.replace(/[?']/g, m => m === '?' ? 'QMARK' : 'QUOTE')] = 0x80 + i);
+// Convenient aliases
+const KW_BEEP=0x80, KW_INPUT=0x82, KW_IF=0x83, KW_FOR=0x84, KW_GOTO=0x85, KW_GOSUB=0x86,
+      KW_LIST=0x87, KW_LET=0x88, KW_MEM=0x8A, KW_NEXT=0x8B, KW_NEW=0x8C, KW_PRINT=0x8D,
+      KW_PAUSE=0x8E, KW_RUN=0x90, KW_RETURN=0x91, KW_REM=0x92, KW_STOP=0x93,
+      KW_USING=0x95, KW_END=0x9C, KW_RADIAN=0x9F, KW_DEGREE=0xA0, KW_GRAD=0xA1,
+      KW_TO=0xA2, KW_STEP=0xA3;
+const KF_SIN=0xA4, KF_COS=0xA5, KF_TAN=0xA6, KF_ASN=0xA7, KF_ACS=0xA8, KF_ATN=0xA9,
+      KF_LN=0xAA, KF_LOG=0xAB, KF_EXP=0xAC, KF_ABS=0xAE, KF_RND=0xB1, KF_SGN=0xB2,
+      KF_INT=0xB3, KF_DEG=0xB4, KF_DMS=0xB5, KF_SQR=0xB6;
+
+const RELOPS = ['>=','<>','>','=','<=','<','!='];
+
+const NL = 0x0A;
+
+// ===== TinyBasic Interpreter =====
+class TinyBasic {
+  constructor() {
+    this.program = new Uint8Array(1800);
+    this.programEnd = 0;
+    // Variables: 26 numeric (A-Z), 26 string (A$-Z$)
+    this.numVars = new Float64Array(27); // 0-25 = A-Z, 26 = temp
+    this.strVars = new Array(26).fill('');
+    // Stack for FOR/GOSUB
+    this.stack = [];
+    this.maxStack = 5;
+    // State machine
+    this.nextStep = 'WARMSTART';
+    this.currentLine = -1; // offset into program, -1 = direct mode
+    this.txtpos = 0;
+    this.directLine = new Uint8Array(128);
+    this.directLen = 0;
+    this.directPos = 0;
+    // I/O
+    this.outputBuffer = '';
+    this.inputBuffer = '';
+    this.inputMode = false;
+    this.inputCallback = null;
+    // Expression type tracking
+    this.expType = 'NUMERIC';
+    // Angle mode
+    this.angleMode = 'DEGREE';
+    // Error state
+    this.errorMsg = '';
+    // USING format
+    this.usingFormat = '';
+    // Running state
+    this.running = false;
+    // PAUSE
+    this.pauseFlag = false;
+    this.pauseTimer = 0;
+    // BEEP
+    this.beepFlag = false;
+    // Random seed
+    this.rndSeed = Math.random();
+  }
+
+  reset() {
+    this.program.fill(0);
+    this.programEnd = 0;
+    this.numVars.fill(0);
+    this.strVars.fill('');
+    this.stack = [];
+    this.nextStep = 'WARMSTART';
+    this.currentLine = -1;
+    this.outputBuffer = '';
+    this.inputBuffer = '';
+    this.inputMode = false;
+    this.running = false;
+    this.errorMsg = '';
+    this.usingFormat = '';
+    this.angleMode = 'DEGREE';
+  }
+
+  // Tokenize a line of text into bytecodes
+  tokenize(text) {
+    const out = [];
+    let i = 0;
+    let inString = false;
+    while (i < text.length) {
+      // Track string literals — don't tokenize inside them
+      if (text[i] === '"') {
+        inString = !inString;
+        out.push(0x22);
+        i++;
+        continue;
+      }
+      if (inString) {
+        out.push(text.charCodeAt(i));
+        i++;
+        continue;
+      }
+      // Try to match a keyword
+      let matched = false;
+      const upper = text.substring(i).toUpperCase();
+      for (let k = 0; k < KEYWORDS.length; k++) {
+        const kw = KEYWORDS[k];
+        if (upper.startsWith(kw) && kw.length > 0) {
+          // Make sure it's not part of a longer identifier
+          const after = i + kw.length;
+          if (/[A-Z]/.test(kw[0]) && after < text.length && /[A-Z0-9]/i.test(text[after])) {
+            continue; // Part of longer word
+          }
+          out.push(0x80 + k);
+          i += kw.length;
+          // Skip trailing space after keyword (it will be re-added on display)
+          if (i < text.length && text[i] === ' ') i++;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        out.push(text.charCodeAt(i));
+        i++;
+      }
+    }
+    return out;
+  }
+
+  // Expand tokens back to text for display
+  expandTokens(tokens, start, end) {
+    let s = '';
+    for (let i = start; i < end; i++) {
+      const b = tokens[i];
+      if (b >= 0x80 && (b - 0x80) < KEYWORDS.length) {
+        s += KEYWORDS[b - 0x80] + ' ';
+      } else if (b === NL) {
+        break;
+      } else if (b === 0x18) {
+        s += '\u221A'; // √
+      } else if (b === 0x19) {
+        s += '\u03C0'; // π
+      } else {
+        s += String.fromCharCode(b);
+      }
+    }
+    return s;
+  }
+
+  // Insert a line into program memory
+  insertLine(lineNum, tokens) {
+    // Remove existing line with same number
+    this.removeLine(lineNum);
+    if (tokens.length === 0) return; // Just delete
+
+    // Build the line: [linenum_hi, linenum_lo, length, ...tokens, NL]
+    const lineData = [];
+    lineData.push((lineNum >> 8) & 0xFF);
+    lineData.push(lineNum & 0xFF);
+    lineData.push(0); // placeholder for length
+    for (const b of tokens) lineData.push(b);
+    lineData.push(NL);
+    lineData[2] = lineData.length;
+
+    // Find insertion point (lines sorted by number)
+    let pos = 0;
+    while (pos < this.programEnd) {
+      const ln = (this.program[pos] << 8) | this.program[pos + 1];
+      if (ln >= lineNum) break;
+      pos += this.program[pos + 2];
+    }
+
+    // Check space
+    if (this.programEnd + lineData.length > this.program.length - 100) {
+      this.errorMsg = 'MEMORY FULL';
+      return;
+    }
+
+    // Make room
+    this.program.copyWithin(pos + lineData.length, pos, this.programEnd);
+    // Copy line in
+    for (let i = 0; i < lineData.length; i++) {
+      this.program[pos + i] = lineData[i];
+    }
+    this.programEnd += lineData.length;
+  }
+
+  removeLine(lineNum) {
+    let pos = 0;
+    while (pos < this.programEnd) {
+      const ln = (this.program[pos] << 8) | this.program[pos + 1];
+      const len = this.program[pos + 2];
+      if (ln === lineNum) {
+        this.program.copyWithin(pos, pos + len, this.programEnd);
+        this.programEnd -= len;
+        return true;
+      }
+      if (ln > lineNum) break;
+      pos += len;
+    }
+    return false;
+  }
+
+  // Find a line by number, return offset or -1
+  findLine(lineNum) {
+    let pos = 0;
+    while (pos < this.programEnd) {
+      const ln = (this.program[pos] << 8) | this.program[pos + 1];
+      if (ln === lineNum) return pos;
+      if (ln > lineNum) return -1;
+      pos += this.program[pos + 2];
+    }
+    return -1;
+  }
+
+  // Get current byte from active source (program or direct line)
+  curByte() {
+    if (this.currentLine >= 0) {
+      return this.program[this.txtpos] || 0;
+    }
+    return this.directLine[this.directPos] || 0;
+  }
+
+  advance() {
+    if (this.currentLine >= 0) this.txtpos++;
+    else this.directPos++;
+  }
+
+  peekByte() {
+    if (this.currentLine >= 0) return this.program[this.txtpos + 1] || 0;
+    return this.directLine[this.directPos + 1] || 0;
+  }
+
+  setPos(p) {
+    if (this.currentLine >= 0) this.txtpos = p;
+    else this.directPos = p;
+  }
+
+  getPos() {
+    return this.currentLine >= 0 ? this.txtpos : this.directPos;
+  }
+
+  skipSpaces() {
+    while (this.curByte() === 0x20) this.advance();
+  }
+
+  // Parse a line number at current position
+  parseLineNum() {
+    this.skipSpaces();
+    let n = 0;
+    let found = false;
+    while (this.curByte() >= 0x30 && this.curByte() <= 0x39) {
+      n = n * 10 + (this.curByte() - 0x30);
+      this.advance();
+      found = true;
+    }
+    return found ? n : -1;
+  }
+
+  // ===== Expression Parser =====
+  // Returns numeric value or string
+
+  toAngle(rad) {
+    if (this.angleMode === 'DEGREE') return rad * 180 / Math.PI;
+    if (this.angleMode === 'GRAD') return rad * 200 / Math.PI;
+    return rad;
+  }
+
+  fromAngle(val) {
+    if (this.angleMode === 'DEGREE') return val * Math.PI / 180;
+    if (this.angleMode === 'GRAD') return val * Math.PI / 200;
+    return val;
+  }
+
+  expression() {
+    let left = this.expr2();
+    if (this.expType === 'ERROR') return 0;
+    this.skipSpaces();
+    // Relational operators
+    while (true) {
+      const b = this.curByte();
+      const b2 = this.peekByte();
+      let op = -1;
+      if (b === 0x3E && b2 === 0x3D) { op = 0; this.advance(); this.advance(); } // >=
+      else if (b === 0x3C && b2 === 0x3E) { op = 1; this.advance(); this.advance(); } // <>
+      else if (b === 0x3E) { op = 2; this.advance(); } // >
+      else if (b === 0x3D) { op = 3; this.advance(); } // =
+      else if (b === 0x3C && b2 === 0x3D) { op = 4; this.advance(); this.advance(); } // <=
+      else if (b === 0x3C) { op = 5; this.advance(); } // <
+      else if (b === 0x21 && b2 === 0x3D) { op = 6; this.advance(); this.advance(); } // !=
+      else break;
+
+      const savedType = this.expType;
+      const right = this.expr2();
+      if (this.expType === 'ERROR') return 0;
+
+      if (savedType === 'STRING' && this.expType === 'STRING') {
+        // String comparison
+        const ls = this._lastStrLeft;
+        const rs = this._lastStrRight;
+        switch (op) {
+          case 0: left = ls >= rs ? 1 : 0; break;
+          case 1: case 6: left = ls !== rs ? 1 : 0; break;
+          case 2: left = ls > rs ? 1 : 0; break;
+          case 3: left = ls === rs ? 1 : 0; break;
+          case 4: left = ls <= rs ? 1 : 0; break;
+          case 5: left = ls < rs ? 1 : 0; break;
+        }
+      } else {
+        switch (op) {
+          case 0: left = left >= right ? 1 : 0; break;
+          case 1: case 6: left = left !== right ? 1 : 0; break;
+          case 2: left = left > right ? 1 : 0; break;
+          case 3: left = left === right ? 1 : 0; break;
+          case 4: left = left <= right ? 1 : 0; break;
+          case 5: left = left < right ? 1 : 0; break;
+        }
+      }
+      this.expType = 'NUMERIC';
+      this.skipSpaces();
+    }
+    return left;
+  }
+
+  expr2() {
+    let left = this.expr3();
+    if (this.expType === 'ERROR') return 0;
+    this.skipSpaces();
+    while (true) {
+      const b = this.curByte();
+      if (b === 0x2B) { // +
+        this.advance();
+        if (this.expType === 'STRING') {
+          const ls = this._lastStr;
+          const right = this.expr3();
+          if (this.expType === 'STRING') {
+            this._lastStr = ls + this._lastStr;
+            this._lastStrLeft = this._lastStr;
+            left = 0;
+          } else {
+            this.expType = 'ERROR'; this.errorMsg = 'TYPE MISMATCH'; return 0;
+          }
+        } else {
+          left += this.expr3();
+        }
+      } else if (b === 0x2D) { // -
+        this.advance();
+        left -= this.expr3();
+      } else break;
+      if (this.expType === 'ERROR') return 0;
+      this.skipSpaces();
+    }
+    return left;
+  }
+
+  expr3() {
+    let left = this.expr4();
+    if (this.expType === 'ERROR') return 0;
+    this.skipSpaces();
+    while (true) {
+      const b = this.curByte();
+      if (b === 0x2A) { this.advance(); left *= this.expr4(); } // *
+      else if (b === 0x2F) { // /
+        this.advance();
+        const d = this.expr4();
+        if (d === 0) { this.expType = 'ERROR'; this.errorMsg = 'DIV BY ZERO'; return 0; }
+        left /= d;
+      } else break;
+      if (this.expType === 'ERROR') return 0;
+      this.skipSpaces();
+    }
+    return left;
+  }
+
+  expr4() {
+    let left = this.expr5();
+    if (this.expType === 'ERROR') return 0;
+    this.skipSpaces();
+    if (this.curByte() === 0x5E) { // ^
+      this.advance();
+      const right = this.expr4(); // right-associative
+      left = Math.pow(left, right);
+    }
+    return left;
+  }
+
+  expr5() {
+    this.skipSpaces();
+    const b = this.curByte();
+
+    // Unary minus
+    if (b === 0x2D) {
+      this.advance();
+      return -this.expr5();
+    }
+
+    // Unary plus
+    if (b === 0x2B) {
+      this.advance();
+      return this.expr5();
+    }
+
+    // Parenthesized expression
+    if (b === 0x28) { // (
+      this.advance();
+      const val = this.expression();
+      this.skipSpaces();
+      if (this.curByte() === 0x29) this.advance(); // )
+      return val;
+    }
+
+    // String literal
+    if (b === 0x22) { // "
+      this.advance();
+      let s = '';
+      while (this.curByte() !== 0x22 && this.curByte() !== NL && this.curByte() !== 0) {
+        s += String.fromCharCode(this.curByte());
+        this.advance();
+      }
+      if (this.curByte() === 0x22) this.advance();
+      this.expType = 'STRING';
+      this._lastStr = s;
+      this._lastStrLeft = s;
+      return 0;
+    }
+
+    // PI constant (0x19 char, or typed as "PI")
+    if (b === 0x19) {
+      this.advance();
+      this.expType = 'NUMERIC';
+      return Math.PI;
+    }
+    if ((b === 0x50 || b === 0x70) && (this.peekByte() === 0x49 || this.peekByte() === 0x69)) {
+      // Check it's not part of a longer word like "PINMODE"
+      const saved = this.getPos();
+      this.advance(); this.advance();
+      const next = this.curByte();
+      if (!(next >= 0x41 && next <= 0x5A) && !(next >= 0x61 && next <= 0x7A)) {
+        this.expType = 'NUMERIC';
+        return Math.PI;
+      }
+      this.setPos(saved);
+    }
+
+    // SQR symbol (0x18)
+    if (b === 0x18) {
+      this.advance();
+      if (this.curByte() === 0x28) { // (
+        this.advance();
+        const val = this.expression();
+        this.skipSpaces();
+        if (this.curByte() === 0x29) this.advance();
+        this.expType = 'NUMERIC';
+        return Math.sqrt(val);
+      }
+      this.expType = 'NUMERIC';
+      return 0;
+    }
+
+    // Number literal
+    if ((b >= 0x30 && b <= 0x39) || b === 0x2E) {
+      let numStr = '';
+      while ((this.curByte() >= 0x30 && this.curByte() <= 0x39) ||
+             this.curByte() === 0x2E || this.curByte() === 0x45 || this.curByte() === 0x65 ||
+             ((this.curByte() === 0x2B || this.curByte() === 0x2D) &&
+              (numStr.endsWith('E') || numStr.endsWith('e')))) {
+        numStr += String.fromCharCode(this.curByte());
+        this.advance();
+      }
+      this.expType = 'NUMERIC';
+      return parseFloat(numStr) || 0;
+    }
+
+    // Functions (tokens >= KF_SIN)
+    if (b >= KF_SIN && b <= KF_SQR) {
+      this.advance();
+      this.skipSpaces();
+      let val;
+      if (this.curByte() === 0x28) {
+        this.advance();
+        val = this.expression();
+        this.skipSpaces();
+        if (this.curByte() === 0x29) this.advance();
+      } else {
+        val = this.expr5();
+      }
+      this.expType = 'NUMERIC';
+      switch (b) {
+        case KF_SIN: return Math.sin(this.fromAngle(val));
+        case KF_COS: return Math.cos(this.fromAngle(val));
+        case KF_TAN: return Math.tan(this.fromAngle(val));
+        case KF_ASN: return this.toAngle(Math.asin(val));
+        case KF_ACS: return this.toAngle(Math.acos(val));
+        case KF_ATN: return this.toAngle(Math.atan(val));
+        case KF_LN:  return Math.log(val);
+        case KF_LOG: return Math.log10(val);
+        case KF_EXP: return Math.exp(val);
+        case KF_ABS: return Math.abs(val);
+        case KF_RND: return Math.random() * val;
+        case KF_SGN: return val > 0 ? 1 : val < 0 ? -1 : 0;
+        case KF_INT: return Math.floor(val);
+        case KF_SQR: return Math.sqrt(val);
+        case KF_DEG: {
+          // DMS to decimal degrees
+          const d = Math.floor(Math.abs(val));
+          const m = Math.floor((Math.abs(val) - d) * 100);
+          const s = ((Math.abs(val) - d) * 100 - m) * 100;
+          return (val < 0 ? -1 : 1) * (d + m / 60 + s / 3600);
+        }
+        case KF_DMS: {
+          // Decimal degrees to DMS
+          const abs = Math.abs(val);
+          const d = Math.floor(abs);
+          const mf = (abs - d) * 60;
+          const m = Math.floor(mf);
+          const s = (mf - m) * 60;
+          return (val < 0 ? -1 : 1) * (d + m / 100 + s / 10000);
+        }
+        default: return val;
+      }
+    }
+
+    // Variable (A-Z, optionally with $ for string, or A(n) for array)
+    if ((b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A)) {
+      const varIdx = (b >= 0x61 ? b - 0x61 : b - 0x41);
+      this.advance();
+      this.skipSpaces();
+
+      // String variable: X$
+      if (this.curByte() === 0x24) { // $
+        this.advance();
+        this.expType = 'STRING';
+        this._lastStr = this.strVars[varIdx];
+        this._lastStrLeft = this._lastStr;
+        return 0;
+      }
+
+      // Array: A(n)
+      if (this.curByte() === 0x28) { // (
+        this.advance();
+        const idx = Math.floor(this.expression());
+        this.skipSpaces();
+        if (this.curByte() === 0x29) this.advance();
+        this.expType = 'NUMERIC';
+        const ai = varIdx + idx;
+        if (ai >= 0 && ai < 26) return this.numVars[ai];
+        this.errorMsg = 'SUBSCRIPT ERROR';
+        this.expType = 'ERROR';
+        return 0;
+      }
+
+      this.expType = 'NUMERIC';
+      return this.numVars[varIdx];
+    }
+
+    // Nothing recognized
+    this.expType = 'NUMERIC';
+    return 0;
+  }
+
+  // Format number for display (PC-1211 style)
+  formatNum(n) {
+    if (this.usingFormat) {
+      return this.formatUsing(n);
+    }
+    if (Number.isNaN(n)) return 'ERROR';
+    if (!Number.isFinite(n)) return n > 0 ? '1.+10' : '-1.+10';
+    if (n === 0) return '0.';
+
+    // Use toPrecision for up to 10 significant digits
+    let s = n.toPrecision(10);
+    // Remove trailing zeros after decimal point
+    if (s.includes('.') && !s.includes('e') && !s.includes('E')) {
+      s = s.replace(/0+$/, '');
+    }
+    // Ensure trailing dot if no exponent
+    if (!s.includes('.') && !s.includes('e') && !s.includes('E')) {
+      s += '.';
+    }
+    // Format exponent PC-1211 style
+    s = s.replace(/e\+?(-?)0*(\d+)/, (_, sign, digits) => '+' + sign + digits);
+    s = s.replace(/E\+?(-?)0*(\d+)/, (_, sign, digits) => '+' + sign + digits);
+    return s;
+  }
+
+  formatUsing(n) {
+    const fmt = this.usingFormat;
+    // Count # before and after decimal point
+    const dotPos = fmt.indexOf('.');
+    let intDigits, decDigits;
+    if (dotPos >= 0) {
+      intDigits = (fmt.substring(0, dotPos).match(/#/g) || []).length;
+      decDigits = (fmt.substring(dotPos + 1).match(/#/g) || []).length;
+    } else {
+      intDigits = (fmt.match(/#/g) || []).length;
+      decDigits = 0;
+    }
+    let s = Math.abs(n).toFixed(decDigits);
+    const parts = s.split('.');
+    while (parts[0].length < intDigits) parts[0] = ' ' + parts[0];
+    s = parts.join('.');
+    if (n < 0) s = '-' + s;
+    return s;
+  }
+
+  // ===== Statement Execution =====
+
+  step() {
+    if (this.pauseFlag) return 'PAUSE';
+    const state = this.nextStep;
+
+    switch (state) {
+      case 'WARMSTART':
+        this.currentLine = -1;
+        this.stack = [];
+        this.running = false;
+        this.errorMsg = '';
+        this.usingFormat = '';
+        this.nextStep = 'PROMPT';
+        this._programOutputDone = true;
+        return 'OK';
+
+      case 'PROMPT':
+        this.inputMode = true;
+        this.outputBuffer = '';
+        this.nextStep = 'GETLN';
+        return 'PROMPT';
+
+      case 'GETLN':
+        // Waiting for input — do nothing
+        return 'WAITING';
+
+      case 'GETLN_END': {
+        // Process input line
+        const line = this.inputBuffer.toUpperCase();
+        this.inputBuffer = '';
+        this.inputMode = false;
+
+        // Try to parse line number
+        let i = 0;
+        while (i < line.length && line[i] === ' ') i++;
+        let lineNum = 0;
+        let hasNum = false;
+        while (i < line.length && line[i] >= '0' && line[i] <= '9') {
+          lineNum = lineNum * 10 + (line.charCodeAt(i) - 0x30);
+          i++;
+          hasNum = true;
+        }
+
+        if (hasNum) {
+          // Program line — tokenize and store
+          const rest = line.substring(i);
+          const tokens = this.tokenize(rest.trimStart());
+          if (tokens.length === 0) {
+            this.removeLine(lineNum);
+          } else {
+            this.insertLine(lineNum, tokens);
+          }
+          if (this.errorMsg) {
+            this.outputBuffer = this.errorMsg;
+            this.errorMsg = '';
+            this.nextStep = 'WARMSTART';
+          } else {
+            this.nextStep = 'PROMPT';
+          }
+        } else {
+          // Direct command
+          const tokens = this.tokenize(line.trim());
+          this.directLine.fill(0);
+          for (let j = 0; j < tokens.length; j++) this.directLine[j] = tokens[j];
+          this.directLine[tokens.length] = NL;
+          this.directLen = tokens.length;
+          this.directPos = 0;
+          this.currentLine = -1;
+          this.nextStep = 'INTERPRET';
+        }
+        return 'OK';
+      }
+
+      case 'INTERPRET':
+        return this.interpretStatement();
+
+      case 'EXECLINE':
+        if (this.currentLine < 0 || this.currentLine >= this.programEnd) {
+          this.nextStep = 'WARMSTART';
+          this.running = false;
+          return 'OK';
+        }
+        this.txtpos = this.currentLine + 3; // skip linenum(2) + len(1)
+        this.nextStep = 'INTERPRET';
+        return 'OK';
+
+      case 'EXECNEXTLINE':
+        if (this.currentLine < 0 || this.currentLine >= this.programEnd) {
+          this.nextStep = 'WARMSTART';
+          this.running = false;
+          return 'OK';
+        }
+        this.currentLine += this.program[this.currentLine + 2]; // advance by line length
+        if (this.currentLine >= this.programEnd) {
+          this.nextStep = 'WARMSTART';
+          this.running = false;
+          return 'OK';
+        }
+        this.nextStep = 'EXECLINE';
+        return 'OK';
+
+      case 'RUN_NEXT_STATEMENT': {
+        this.skipSpaces();
+        const c = this.curByte();
+        if (c === 0x3A) { // :
+          this.advance();
+          this.nextStep = 'INTERPRET';
+        } else if (c === NL || c === 0) {
+          this.nextStep = 'EXECNEXTLINE';
+        } else {
+          this.nextStep = 'INTERPRET';
+        }
+        return 'OK';
+      }
+
+      case 'INPUT_WAIT':
+        return 'WAITING';
+
+      case 'INPUT_DONE': {
+        // Process INPUT value
+        const val = this.inputBuffer;
+        this.inputBuffer = '';
+        this.inputMode = false;
+        const varIdx = this._inputVarIdx;
+        const isStr = this._inputIsStr;
+        if (isStr) {
+          this.strVars[varIdx] = val.substring(0, 7);
+        } else {
+          this.numVars[varIdx] = parseFloat(val) || 0;
+        }
+        this.nextStep = 'RUN_NEXT_STATEMENT';
+        return 'OK';
+      }
+
+      case 'LIST':
+        return this.doList();
+
+      case 'QWHAT':
+        this.outputBuffer = 'WHAT?';
+        this.nextStep = 'WARMSTART';
+        this.running = false;
+        return 'ERROR';
+
+      case 'QHOW':
+        this.outputBuffer = 'HOW?';
+        this.nextStep = 'WARMSTART';
+        this.running = false;
+        return 'ERROR';
+
+      case 'QSORRY':
+        this.outputBuffer = 'SORRY';
+        this.nextStep = 'WARMSTART';
+        this.running = false;
+        return 'ERROR';
+
+      default:
+        this.nextStep = 'WARMSTART';
+        return 'OK';
+    }
+  }
+
+  interpretStatement() {
+    this.skipSpaces();
+    const b = this.curByte();
+
+    if (b === NL || b === 0) {
+      if (this.currentLine >= 0) {
+        this.nextStep = 'EXECNEXTLINE';
+      } else {
+        this.nextStep = 'PROMPT';
+      }
+      return 'OK';
+    }
+
+    if (b === 0x3A) { // : (multi-statement separator)
+      this.advance();
+      return this.interpretStatement();
+    }
+
+    // Check for keyword token
+    if (b >= 0x80) {
+      this.advance();
+      switch (b) {
+        case KW_PRINT: case 0x97: case 0x80+23: return this.go_PRINT(); // ? and '
+        case KW_INPUT: return this.go_INPUT();
+        case KW_LET: return this.go_LET();
+        case KW_IF: return this.go_IF();
+        case KW_GOTO: return this.go_GOTO();
+        case KW_GOSUB: return this.go_GOSUB();
+        case KW_RETURN: return this.go_RETURN();
+        case KW_FOR: return this.go_FOR();
+        case KW_NEXT: return this.go_NEXT();
+        case KW_RUN: return this.go_RUN();
+        case KW_LIST: return this.go_LIST();
+        case KW_NEW: return this.go_NEW();
+        case KW_MEM: return this.go_MEM();
+        case KW_REM: return this.go_REM();
+        case KW_STOP: case KW_END: return this.go_STOP();
+        case KW_PAUSE: return this.go_PAUSE();
+        case KW_BEEP: this.beepFlag = true; this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
+        case KW_USING: return this.go_USING();
+        case KW_DEGREE: this.angleMode = 'DEGREE'; this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
+        case KW_RADIAN: this.angleMode = 'RADIAN'; this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
+        case KW_GRAD: this.angleMode = 'GRAD'; this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
+        default:
+          this.nextStep = 'QWHAT';
+          return 'ERROR';
+      }
+    }
+
+    // Implicit LET: variable assignment without LET keyword
+    if ((b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A)) {
+      return this.go_LET();
+    }
+
+    this.nextStep = 'QWHAT';
+    return 'ERROR';
+  }
+
+  go_PRINT() {
+    this.skipSpaces();
+    let output = '';
+    let needNewline = true;
+
+    while (true) {
+      this.skipSpaces();
+      const b = this.curByte();
+      if (b === NL || b === 0 || b === 0x3A) break;
+
+      if (b === 0x2C) { // , (tab)
+        output += '\t';
+        this.advance();
+        needNewline = false;
+        continue;
+      }
+      if (b === 0x3B) { // ;
+        this.advance();
+        needNewline = false;
+        continue;
+      }
+
+      // Expression
+      const val = this.expression();
+      if (this.expType === 'ERROR') {
+        this.outputBuffer = this.errorMsg || 'ERROR';
+        this.nextStep = 'WARMSTART';
+        this.running = false;
+        return 'ERROR';
+      }
+
+      if (this.expType === 'STRING') {
+        output += this._lastStr;
+      } else {
+        output += this.formatNum(val);
+      }
+      needNewline = true;
+    }
+
+    this.outputBuffer = output;
+    this.usingFormat = '';
+    this.nextStep = 'RUN_NEXT_STATEMENT';
+    return 'PRINT';
+  }
+
+  go_INPUT() {
+    this.skipSpaces();
+    let prompt = '?';
+
+    // Check for string prompt: INPUT "prompt";V
+    if (this.curByte() === 0x22) {
+      this.advance();
+      prompt = '';
+      while (this.curByte() !== 0x22 && this.curByte() !== NL) {
+        prompt += String.fromCharCode(this.curByte());
+        this.advance();
+      }
+      if (this.curByte() === 0x22) this.advance();
+      this.skipSpaces();
+      if (this.curByte() === 0x3B || this.curByte() === 0x2C) this.advance(); // skip ; or ,
+    }
+
+    this.skipSpaces();
+    const b = this.curByte();
+    if (b >= 0x41 && b <= 0x5A || b >= 0x61 && b <= 0x7A) {
+      const varIdx = b >= 0x61 ? b - 0x61 : b - 0x41;
+      this.advance();
+      let isStr = false;
+      if (this.curByte() === 0x24) { // $
+        this.advance();
+        isStr = true;
+      }
+      this._inputVarIdx = varIdx;
+      this._inputIsStr = isStr;
+      this.outputBuffer = prompt;
+      this.inputMode = true;
+      this.nextStep = 'INPUT_WAIT';
+      return 'INPUT';
+    }
+
+    this.nextStep = 'QWHAT';
+    return 'ERROR';
+  }
+
+  go_LET() {
+    this.skipSpaces();
+    const b = this.curByte();
+    if (!(b >= 0x41 && b <= 0x5A) && !(b >= 0x61 && b <= 0x7A)) {
+      this.nextStep = 'QWHAT';
+      return 'ERROR';
+    }
+    const varIdx = b >= 0x61 ? b - 0x61 : b - 0x41;
+    this.advance();
+    this.skipSpaces();
+
+    // String variable
+    if (this.curByte() === 0x24) { // $
+      this.advance();
+      this.skipSpaces();
+      if (this.curByte() !== 0x3D) { this.nextStep = 'QWHAT'; return 'ERROR'; }
+      this.advance();
+      const val = this.expression();
+      if (this.expType === 'STRING') {
+        this.strVars[varIdx] = this._lastStr.substring(0, 7);
+      } else {
+        this.nextStep = 'QWHAT'; return 'ERROR';
+      }
+      this.nextStep = 'RUN_NEXT_STATEMENT';
+      return 'OK';
+    }
+
+    // Array variable A(n)
+    if (this.curByte() === 0x28) {
+      this.advance();
+      const idx = Math.floor(this.expression());
+      this.skipSpaces();
+      if (this.curByte() === 0x29) this.advance();
+      this.skipSpaces();
+      if (this.curByte() !== 0x3D) { this.nextStep = 'QWHAT'; return 'ERROR'; }
+      this.advance();
+      const val = this.expression();
+      if (this.expType === 'ERROR') {
+        this.outputBuffer = this.errorMsg || 'ERROR';
+        this.nextStep = 'WARMSTART'; return 'ERROR';
+      }
+      const ai = varIdx + idx;
+      if (ai >= 0 && ai < 26) this.numVars[ai] = val;
+      this.nextStep = 'RUN_NEXT_STATEMENT';
+      return 'OK';
+    }
+
+    // Simple numeric variable
+    if (this.curByte() !== 0x3D) { this.nextStep = 'QWHAT'; return 'ERROR'; }
+    this.advance();
+    const val = this.expression();
+    if (this.expType === 'ERROR') {
+      this.outputBuffer = this.errorMsg || 'ERROR';
+      this.nextStep = 'WARMSTART'; return 'ERROR';
+    }
+    this.numVars[varIdx] = val;
+    this.nextStep = 'RUN_NEXT_STATEMENT';
+    return 'OK';
+  }
+
+  go_IF() {
+    const val = this.expression();
+    if (this.expType === 'ERROR') {
+      this.outputBuffer = this.errorMsg || 'ERROR';
+      this.nextStep = 'WARMSTART'; return 'ERROR';
+    }
+    this.skipSpaces();
+    // Skip optional THEN (not tokenized on PC-1211, appears as raw text)
+    const cb = this.curByte();
+    if (cb === 0x54 || cb === 0x74) { // T or t
+      const saved = this.getPos();
+      let word = '';
+      for (let i = 0; i < 4 && this.curByte() >= 0x41; i++) {
+        word += String.fromCharCode(this.curByte()).toUpperCase();
+        this.advance();
+      }
+      if (word !== 'THEN') this.setPos(saved);
+    }
+    this.skipSpaces();
+
+    if (val !== 0) {
+      // Condition true: check if next is a line number (implied GOTO)
+      const saved = this.getPos();
+      const lineNum = this.parseLineNum();
+      if (lineNum >= 0) {
+        // IF ... THEN linenum = GOTO linenum
+        const pos = this.findLine(lineNum);
+        if (pos < 0) { this.nextStep = 'QHOW'; return 'ERROR'; }
+        this.currentLine = pos;
+        this.nextStep = 'EXECLINE';
+        return 'OK';
+      }
+      this.setPos(saved);
+      this.nextStep = 'INTERPRET';
+    } else {
+      // Condition false: skip to end of line
+      if (this.currentLine >= 0) {
+        this.nextStep = 'EXECNEXTLINE';
+      } else {
+        this.nextStep = 'PROMPT';
+      }
+    }
+    return 'OK';
+  }
+
+  go_GOTO() {
+    this.skipSpaces();
+    const lineNum = this.parseLineNum();
+    if (lineNum < 0) {
+      const val = Math.floor(this.expression());
+      if (this.expType === 'ERROR') { this.nextStep = 'QWHAT'; return 'ERROR'; }
+      const pos = this.findLine(val);
+      if (pos < 0) { this.nextStep = 'QHOW'; return 'ERROR'; }
+      this.currentLine = pos;
+      this.running = true;
+      this.nextStep = 'EXECLINE';
+      return 'OK';
+    }
+    const pos = this.findLine(lineNum);
+    if (pos < 0) { this.nextStep = 'QHOW'; return 'ERROR'; }
+    this.currentLine = pos;
+    this.running = true;
+    this.nextStep = 'EXECLINE';
+    return 'OK';
+  }
+
+  go_GOSUB() {
+    this.skipSpaces();
+    const lineNum = this.parseLineNum();
+    if (lineNum < 0) { this.nextStep = 'QWHAT'; return 'ERROR'; }
+    if (this.stack.length >= this.maxStack) { this.nextStep = 'QSORRY'; return 'ERROR'; }
+    this.stack.push({
+      type: 'GOSUB',
+      currentLine: this.currentLine,
+      pos: this.getPos()
+    });
+    const pos = this.findLine(lineNum);
+    if (pos < 0) { this.nextStep = 'QHOW'; return 'ERROR'; }
+    this.currentLine = pos;
+    this.running = true;
+    this.nextStep = 'EXECLINE';
+    return 'OK';
+  }
+
+  go_RETURN() {
+    while (this.stack.length > 0) {
+      const frame = this.stack.pop();
+      if (frame.type === 'GOSUB') {
+        this.currentLine = frame.currentLine;
+        this.setPos(frame.pos);
+        this.nextStep = 'RUN_NEXT_STATEMENT';
+        return 'OK';
+      }
+    }
+    this.nextStep = 'QWHAT';
+    return 'ERROR';
+  }
+
+  go_FOR() {
+    this.skipSpaces();
+    const b = this.curByte();
+    if (!(b >= 0x41 && b <= 0x5A) && !(b >= 0x61 && b <= 0x7A)) {
+      this.nextStep = 'QWHAT'; return 'ERROR';
+    }
+    const varIdx = b >= 0x61 ? b - 0x61 : b - 0x41;
+    this.advance();
+    this.skipSpaces();
+    if (this.curByte() !== 0x3D) { this.nextStep = 'QWHAT'; return 'ERROR'; }
+    this.advance();
+
+    const initVal = this.expression();
+    if (this.expType === 'ERROR') { this.nextStep = 'QWHAT'; return 'ERROR'; }
+    this.numVars[varIdx] = initVal;
+
+    this.skipSpaces();
+    if (this.curByte() !== KW_TO) { this.nextStep = 'QWHAT'; return 'ERROR'; }
+    this.advance();
+
+    const terminal = this.expression();
+    if (this.expType === 'ERROR') { this.nextStep = 'QWHAT'; return 'ERROR'; }
+
+    let stepVal = 1;
+    this.skipSpaces();
+    if (this.curByte() === KW_STEP) {
+      this.advance();
+      stepVal = this.expression();
+      if (this.expType === 'ERROR') { this.nextStep = 'QWHAT'; return 'ERROR'; }
+    }
+
+    // Remove any existing FOR frame for same variable
+    this.stack = this.stack.filter(f => !(f.type === 'FOR' && f.varIdx === varIdx));
+
+    if (this.stack.length >= this.maxStack) { this.nextStep = 'QSORRY'; return 'ERROR'; }
+
+    this.stack.push({
+      type: 'FOR',
+      varIdx: varIdx,
+      terminal: terminal,
+      step: stepVal,
+      currentLine: this.currentLine,
+      pos: this.getPos()
+    });
+
+    this.nextStep = 'RUN_NEXT_STATEMENT';
+    return 'OK';
+  }
+
+  go_NEXT() {
+    this.skipSpaces();
+    const b = this.curByte();
+    let varIdx = -1;
+    if ((b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A)) {
+      varIdx = b >= 0x61 ? b - 0x61 : b - 0x41;
+      this.advance();
+    }
+
+    // Find matching FOR frame
+    for (let i = this.stack.length - 1; i >= 0; i--) {
+      const frame = this.stack[i];
+      if (frame.type === 'FOR' && (varIdx < 0 || frame.varIdx === varIdx)) {
+        this.numVars[frame.varIdx] += frame.step;
+        const v = this.numVars[frame.varIdx];
+        const done = frame.step > 0 ? v > frame.terminal : v < frame.terminal;
+        if (done) {
+          this.stack.splice(i, 1);
+          this.nextStep = 'RUN_NEXT_STATEMENT';
+        } else {
+          this.currentLine = frame.currentLine;
+          this.setPos(frame.pos);
+          this.nextStep = 'RUN_NEXT_STATEMENT';
+        }
+        return 'OK';
+      }
+    }
+    this.nextStep = 'QWHAT';
+    return 'ERROR';
+  }
+
+  go_RUN() {
+    this.skipSpaces();
+    // Check for RUN "X" (DEF key)
+    if (this.curByte() === 0x22) {
+      this.advance();
+      // Skip for now — DEF key feature
+      while (this.curByte() !== 0x22 && this.curByte() !== NL) this.advance();
+      if (this.curByte() === 0x22) this.advance();
+      this.nextStep = 'PROMPT';
+      return 'OK';
+    }
+    if (this.programEnd === 0) {
+      this.nextStep = 'PROMPT';
+      return 'OK';
+    }
+    this.stack = [];
+    this.currentLine = 0;
+    this.running = true;
+    this.nextStep = 'EXECLINE';
+    return 'OK';
+  }
+
+  go_LIST() {
+    this._listPos = 0;
+    this._listEnd = this.programEnd;
+    this.nextStep = 'LIST';
+    return 'OK';
+  }
+
+  doList() {
+    if (this._listPos >= this._listEnd) {
+      this.nextStep = 'PROMPT';
+      return 'LIST_DONE';
+    }
+    const ln = (this.program[this._listPos] << 8) | this.program[this._listPos + 1];
+    const len = this.program[this._listPos + 2];
+    let s = ln + ' ';
+    s += this.expandTokens(this.program, this._listPos + 3, this._listPos + len);
+    this.outputBuffer = s;
+    this._listPos += len;
+    this.nextStep = 'LIST';
+    return 'LIST_LINE';
+  }
+
+  go_NEW() {
+    this.program.fill(0);
+    this.programEnd = 0;
+    this.numVars.fill(0);
+    this.strVars.fill('');
+    this.stack = [];
+    this.nextStep = 'PROMPT';
+    return 'OK';
+  }
+
+  go_MEM() {
+    const free = this.program.length - this.programEnd - 100;
+    this.outputBuffer = free + ' BYTES FREE';
+    this.nextStep = 'PROMPT';
+    return 'MEM';
+  }
+
+  go_REM() {
+    // Skip to end of line
+    if (this.currentLine >= 0) {
+      this.nextStep = 'EXECNEXTLINE';
+    } else {
+      this.nextStep = 'PROMPT';
+    }
+    return 'OK';
+  }
+
+  go_STOP() {
+    this.running = false;
+    this.nextStep = 'WARMSTART';
+    return 'STOP';
+  }
+
+  go_PAUSE() {
+    // PAUSE: display expression value, wait ~1.3s, then continue
+    this.skipSpaces();
+    if (this.curByte() !== NL && this.curByte() !== 0 && this.curByte() !== 0x3A) {
+      const val = this.expression();
+      if (this.expType === 'STRING') {
+        this.outputBuffer = this._lastStr;
+      } else {
+        this.outputBuffer = this.formatNum(val);
+      }
+    }
+    this.pauseFlag = true;
+    this.pauseTimer = 0;
+    this.nextStep = 'RUN_NEXT_STATEMENT';
+    return 'PAUSE';
+  }
+
+  go_USING() {
+    this.skipSpaces();
+    if (this.curByte() === 0x22) {
+      this.advance();
+      let fmt = '';
+      while (this.curByte() !== 0x22 && this.curByte() !== NL) {
+        fmt += String.fromCharCode(this.curByte());
+        this.advance();
+      }
+      if (this.curByte() === 0x22) this.advance();
+      this.usingFormat = fmt;
+    }
+    this.nextStep = 'RUN_NEXT_STATEMENT';
+    return 'OK';
+  }
+
+  breakProgram() {
+    if (this.running) {
+      this.running = false;
+      this.outputBuffer = 'BREAK';
+      this.nextStep = 'WARMSTART';
+    }
+  }
+}
+
+// ===== PC1211 Machine =====
+class PC1211 {
+  constructor() {
+    this.basic = new TinyBasic();
+    this.lcd = new LCD(document.getElementById('lcd'));
+    this.mode = 'RUN'; // RUN, PRO, RESERVE, DEF
+    this.shiftActive = false;
+    this.inputBuffer = '';
+    this.cursorPos = 0;
+    this.displayChars = [];
+    this.waitForKey = false;
+    this.listLines = [];
+    this.listIdx = 0;
+    this.powered = true;
+    this._lastProgramOutput = '';
+
+    // Shift map
+    this.shiftMap = {
+      'Q':'!', 'W':'"', 'E':'#', 'R':'$', 'T':'%',
+      'Y':'&', 'U':'?', 'I':':', 'O':',', 'P':';',
+      '(':'<', ')':'>', '/':'^', '.':' '
+    };
+
+    this.updateIndicators();
+  }
+
+  updateIndicators() {
+    document.getElementById('ind-shift').classList.toggle('active', this.shiftActive);
+    document.getElementById('ind-def').classList.toggle('active', this.mode === 'DEF');
+    document.getElementById('ind-pro').classList.toggle('active', this.mode === 'PRO');
+    document.getElementById('ind-run').classList.toggle('active', this.mode === 'RUN');
+    document.getElementById('ind-reserve').classList.toggle('active', this.mode === 'RESERVE');
+    document.getElementById('ind-deg').classList.toggle('active', this.basic.angleMode === 'DEGREE');
+    document.getElementById('ind-rad').classList.toggle('active', this.basic.angleMode === 'RADIAN');
+    document.getElementById('ind-grad').classList.toggle('active', this.basic.angleMode === 'GRAD');
+  }
+
+  switchMode() {
+    const modes = ['RUN', 'PRO', 'RESERVE', 'DEF'];
+    const idx = modes.indexOf(this.mode);
+    this.mode = modes[(idx + 1) % 4];
+    this.inputBuffer = '';
+    this.cursorPos = 0;
+    this.basic.outputBuffer = '';
+    this.waitForKey = false;
+    if (this.mode === 'RUN') {
+      this.basic.nextStep = 'PROMPT';
+      this.basic.inputMode = true;
+    }
+    this.updateIndicators();
+  }
+
+  pressKey(key) {
+    if (!this.powered) return;
+
+    // Handle SHIFT
+    if (key === 'SHIFT') {
+      this.shiftActive = !this.shiftActive;
+      this.updateIndicators();
+      return;
+    }
+
+    // Handle MODE
+    if (key === 'MODE') {
+      this.switchMode();
+      return;
+    }
+
+    // Handle BREAK
+    if (key === 'BRK') {
+      this.basic.breakProgram();
+      this.waitForKey = false;
+      return;
+    }
+
+    // Handle ON
+    if (key === 'ON') {
+      this.powered = true;
+      this.basic.reset();
+      this.basic.nextStep = 'WARMSTART';
+      this.inputBuffer = '';
+      this.cursorPos = 0;
+      this.mode = 'RUN';
+      this.updateIndicators();
+      return;
+    }
+
+    // Handle OFF
+    if (key === 'OFF') {
+      this.powered = false;
+      this.inputBuffer = '';
+      this.basic.outputBuffer = '';
+      return;
+    }
+
+    // If waiting for keypress after output display
+    if (this.waitForKey) {
+      this.waitForKey = false;
+      this.basic.outputBuffer = '';
+      if (this.basic.nextStep === 'LIST') {
+        // Continue listing
+        return;
+      }
+      if (this.basic.nextStep === 'PROMPT') {
+        this.basic.inputMode = true;
+        this.inputBuffer = '';
+        this.cursorPos = 0;
+      }
+      return;
+    }
+
+    // Apply shift
+    let ch = key;
+    if (this.shiftActive) {
+      if (this.shiftMap[key]) {
+        ch = this.shiftMap[key];
+      } else if (key === 'LEFT') {
+        ch = 'DEL';
+      } else if (key === 'RIGHT') {
+        ch = 'INS';
+      } else if (key === 'UP') {
+        ch = '\u03C0'; // PI
+      } else if (key === 'SQR') {
+        ch = '^';
+      }
+      // DEF mode: shift+letter = RUN "letter"
+      if (this.mode === 'DEF' && key.length === 1 && key >= 'A' && key <= 'Z') {
+        this.inputBuffer = 'RUN "' + key + '"';
+        this.mode = 'RUN';
+        this.submitInput();
+        this.shiftActive = false;
+        this.updateIndicators();
+        return;
+      }
+      this.shiftActive = false;
+      this.updateIndicators();
+    }
+
+    // Input mode
+    if (this.basic.inputMode || this.basic.nextStep === 'GETLN' || this.basic.nextStep === 'INPUT_WAIT') {
+      if (ch === 'ENTER') {
+        this.submitInput();
+      } else if (ch === 'CLR') {
+        this.inputBuffer = '';
+        this.cursorPos = 0;
+      } else if (ch === 'LEFT') {
+        if (this.cursorPos > 0) this.cursorPos--;
+      } else if (ch === 'RIGHT') {
+        if (this.cursorPos < this.inputBuffer.length) this.cursorPos++;
+      } else if (ch === 'UP') {
+        if (this.mode === 'PRO') this.listPrev();
+      } else if (ch === 'DOWN') {
+        if (this.mode === 'PRO') this.listNext();
+      } else if (ch === 'DEL') {
+        if (this.cursorPos > 0) {
+          this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos - 1) +
+                            this.inputBuffer.substring(this.cursorPos);
+          this.cursorPos--;
+        }
+      } else if (ch === 'INS') {
+        // Toggle insert mode (simplified: insert a space)
+        this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos) + ' ' +
+                          this.inputBuffer.substring(this.cursorPos);
+      } else if (ch === 'SQR') {
+        this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos) + '\u221A' +
+                          this.inputBuffer.substring(this.cursorPos);
+        this.cursorPos++;
+      } else if (ch.length === 1) {
+        // Regular character
+        if (this.cursorPos < this.inputBuffer.length) {
+          // Overwrite mode
+          this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos) + ch +
+                            this.inputBuffer.substring(this.cursorPos + 1);
+        } else {
+          this.inputBuffer += ch;
+        }
+        this.cursorPos++;
+      }
+    }
+  }
+
+  submitInput() {
+    let line = this.inputBuffer;
+    // Replace special characters with tokens for the interpreter
+    line = line.replace(/\u221A/g, '\x18'); // √ → SQR char
+    line = line.replace(/\u03C0/g, '\x19'); // π → PI char
+
+    if (this.basic.nextStep === 'GETLN') {
+      this.basic.inputBuffer = line;
+      this.basic.nextStep = 'GETLN_END';
+    } else if (this.basic.nextStep === 'INPUT_WAIT') {
+      this.basic.inputBuffer = line;
+      this.basic.nextStep = 'INPUT_DONE';
+    }
+    this.inputBuffer = '';
+    this.cursorPos = 0;
+  }
+
+  listNext() {
+    // In PRO mode, navigate to next program line
+    // Simplified: submit current line and prompt for next
+  }
+
+  listPrev() {
+    // In PRO mode, navigate to previous program line
+  }
+
+  buildDisplay() {
+    let text = '';
+    let cPos = -1;
+
+    if (this.basic.inputMode || this.basic.nextStep === 'GETLN' || this.basic.nextStep === 'INPUT_WAIT') {
+      // Show prompt + input buffer
+      let prompt = '';
+      if (this.basic.nextStep === 'INPUT_WAIT') {
+        prompt = this.basic.outputBuffer;
+      } else if (this.basic.nextStep === 'GETLN') {
+        prompt = this.mode === 'PRO' ? '' : '>';
+      }
+      text = prompt + this.inputBuffer;
+      cPos = prompt.length + this.cursorPos;
+    } else if (this.basic.outputBuffer) {
+      text = this.basic.outputBuffer;
+      cPos = -1;
+    } else {
+      text = '';
+      cPos = -1;
+    }
+
+    // Convert text to character codes
+    const chars = [];
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i);
+      if (c === 0x221A) chars.push(0x18); // √
+      else if (c === 0x03C0) chars.push(0x19); // π
+      else chars.push(c & 0x7F);
+    }
+
+    // Handle scrolling: if cursor > 23, scroll
+    let scrollOffset = 0;
+    if (cPos > 23) {
+      scrollOffset = cPos - 23;
+    }
+
+    this.displayChars = [];
+    for (let i = 0; i < 24; i++) {
+      const idx = i + scrollOffset;
+      this.displayChars.push(idx < chars.length ? chars[idx] : 0x20);
+    }
+
+    return cPos >= 0 ? cPos - scrollOffset : -1;
+  }
+
+  update(dt) {
+    if (!this.powered) {
+      this.lcd.render(new Array(24).fill(0x20), -1, false);
+      return;
+    }
+
+    // Run BASIC steps
+    if (this.basic.running || (this.basic.nextStep !== 'GETLN' && this.basic.nextStep !== 'PROMPT' &&
+        this.basic.nextStep !== 'INPUT_WAIT' && this.basic.nextStep !== 'WARMSTART' &&
+        !this.waitForKey)) {
+
+      // Handle PAUSE timer
+      if (this.basic.pauseFlag) {
+        this.basic.pauseTimer += dt;
+        if (this.basic.pauseTimer >= 1300) {
+          this.basic.pauseFlag = false;
+          this.basic.outputBuffer = '';
+        }
+      } else {
+        const maxSteps = 500; // Steps per frame
+        for (let i = 0; i < maxSteps; i++) {
+          const result = this.basic.step();
+          if (result === 'WAITING' || result === 'PAUSE') break;
+          if (result === 'INPUT') break; // Wait for user input
+          if (result === 'PRINT') {
+            if (this.basic.running && this.basic.currentLine >= 0) {
+              // In a running program: show output, keep running
+              // (output stays on LCD until next PRINT or program end)
+              this._lastProgramOutput = this.basic.outputBuffer;
+              continue;
+            } else {
+              // Direct mode: wait for keypress
+              this.waitForKey = true;
+              break;
+            }
+          }
+          if (result === 'MEM') {
+            this.waitForKey = true;
+            break;
+          }
+          if (result === 'LIST_LINE') {
+            this.waitForKey = true;
+            break;
+          }
+          if (result === 'LIST_DONE') {
+            this.waitForKey = false;
+            break;
+          }
+          if (result === 'ERROR') {
+            this.waitForKey = true;
+            break;
+          }
+          if (result === 'STOP') {
+            this.waitForKey = true;
+            break;
+          }
+          if (this.basic.nextStep === 'GETLN' || this.basic.nextStep === 'PROMPT' ||
+              this.basic.nextStep === 'INPUT_WAIT') break;
+        }
+        // When program ends, show last output
+        if (this.basic._programOutputDone) {
+          this.basic._programOutputDone = false;
+          if (this._lastProgramOutput) {
+            this.basic.outputBuffer = this._lastProgramOutput;
+            this._lastProgramOutput = '';
+            this.waitForKey = true;
+          }
+        }
+      }
+    }
+
+    // Handle BEEP
+    if (this.basic.beepFlag) {
+      this.basic.beepFlag = false;
+      this.doBeep();
+    }
+
+    // Build display
+    const cursorCol = this.buildDisplay();
+    this.lcd.updateBlink(dt);
+    this.lcd.render(this.displayChars, cursorCol, this.basic.inputMode || this.basic.nextStep === 'GETLN' || this.basic.nextStep === 'INPUT_WAIT');
+    this.updateIndicators();
+  }
+
+  doBeep() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 2000;
+      gain.gain.value = 0.1;
+      osc.start();
+      osc.stop(ctx.currentTime + 0.1);
+    } catch(e) {}
+  }
+}
+
+// ===== Keyboard UI =====
+function buildKeyboard() {
+  const kb = document.getElementById('keyboard');
+
+  const rows = [
+    // Row 1: Special keys
+    [
+      { label: 'ON', key: 'ON', cls: 'special' },
+      { label: 'OFF', key: 'OFF', cls: 'special' },
+      { label: 'BRK', key: 'BRK', cls: 'special' },
+      { label: 'MODE', key: 'MODE', cls: 'mode-key' },
+      { label: 'DEF', key: 'SHIFT', shift: true, cls: 'mode-key' },
+      { label: '\u2190', key: 'LEFT' },
+      { label: '\u2192', key: 'RIGHT' },
+      { label: '\u2191', key: 'UP' },
+      { label: '\u2193', key: 'DOWN' },
+      { label: 'CLR', key: 'CLR' },
+    ],
+    // Row 2: Q-P with shift symbols
+    [
+      { label: 'Q', key: 'Q', shift: '!' },
+      { label: 'W', key: 'W', shift: '"' },
+      { label: 'E', key: 'E', shift: '#' },
+      { label: 'R', key: 'R', shift: '$' },
+      { label: 'T', key: 'T', shift: '%' },
+      { label: 'Y', key: 'Y', shift: '&' },
+      { label: 'U', key: 'U', shift: '?' },
+      { label: 'I', key: 'I', shift: ':' },
+      { label: 'O', key: 'O', shift: ',' },
+      { label: 'P', key: 'P', shift: ';' },
+    ],
+    // Row 3: A-L + ENTER
+    [
+      { label: 'A', key: 'A' },
+      { label: 'S', key: 'S' },
+      { label: 'D', key: 'D' },
+      { label: 'F', key: 'F' },
+      { label: 'G', key: 'G' },
+      { label: 'H', key: 'H' },
+      { label: 'J', key: 'J' },
+      { label: 'K', key: 'K' },
+      { label: 'L', key: 'L' },
+      { label: 'ENTER', key: 'ENTER', cls: 'enter-key' },
+    ],
+    // Row 4: SHIFT + Z-M + SQR
+    [
+      { label: 'SHIFT', key: 'SHIFT', cls: 'shift-key wide' },
+      { label: 'Z', key: 'Z' },
+      { label: 'X', key: 'X' },
+      { label: 'C', key: 'C' },
+      { label: 'V', key: 'V' },
+      { label: 'B', key: 'B' },
+      { label: 'N', key: 'N' },
+      { label: 'M', key: 'M' },
+      { label: 'SPACE', key: ' ', cls: 'wide' },
+      { label: '\u221A', key: 'SQR' },
+    ],
+    // Row 5: Numbers and operators
+    [
+      { label: '1', key: '1' },
+      { label: '2', key: '2' },
+      { label: '3', key: '3' },
+      { label: '4', key: '4' },
+      { label: '5', key: '5' },
+      { label: '6', key: '6' },
+      { label: '7', key: '7' },
+      { label: '8', key: '8' },
+      { label: '9', key: '9' },
+      { label: '0', key: '0' },
+    ],
+    // Row 6: Operators
+    [
+      { label: '.', key: '.' },
+      { label: '+', key: '+' },
+      { label: '-', key: '-' },
+      { label: '\u00D7', key: '*' },
+      { label: '\u00F7', key: '/' },
+      { label: '(', key: '(', shift: '<' },
+      { label: ')', key: ')', shift: '>' },
+      { label: '=', key: '=' },
+      { label: '"', key: '"' },
+      { label: '$', key: '$' },
+    ],
+  ];
+
+  for (const row of rows) {
+    const rowDiv = document.createElement('div');
+    rowDiv.className = 'kb-row';
+    for (const k of row) {
+      const btn = document.createElement('button');
+      btn.className = 'key' + (k.cls ? ' ' + k.cls : '');
+      btn.textContent = k.label;
+      if (k.shift && k.shift !== true) {
+        const shiftLabel = document.createElement('span');
+        shiftLabel.className = 'shift-label';
+        shiftLabel.textContent = k.shift;
+        btn.appendChild(shiftLabel);
+      }
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        machine.pressKey(k.key);
+      });
+      btn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        machine.pressKey(k.key);
+      });
+      rowDiv.appendChild(btn);
+    }
+    kb.appendChild(rowDiv);
+  }
+}
+
+// ===== Physical Keyboard Mapping =====
+function setupKeyboardInput() {
+  document.addEventListener('keydown', (e) => {
+    // Prevent default for keys we handle
+    let key = null;
+
+    if (e.key === 'Escape') { key = 'BRK'; e.preventDefault(); }
+    else if (e.key === 'F1') { key = 'MODE'; e.preventDefault(); }
+    else if (e.key === 'Enter') { key = 'ENTER'; e.preventDefault(); }
+    else if (e.key === 'Backspace') { key = 'DEL'; e.preventDefault(); }
+    else if (e.key === 'Delete') { key = 'CLR'; e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { key = 'LEFT'; e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { key = 'RIGHT'; e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { key = 'UP'; e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { key = 'DOWN'; e.preventDefault(); }
+    else if (e.key === 'Shift') { key = 'SHIFT'; e.preventDefault(); }
+    else if (e.key.length === 1) {
+      const ch = e.key.toUpperCase();
+      if (ch >= 'A' && ch <= 'Z') key = ch;
+      else if (ch >= '0' && ch <= '9') key = ch;
+      else if ('+-*/=().^"$:;!?#%&<>,'.includes(ch)) key = ch;
+      else if (ch === ' ') key = ' ';
+      if (key) e.preventDefault();
+    }
+
+    if (key) {
+      machine.pressKey(key);
+      // Visual feedback
+      const btns = document.querySelectorAll('.key');
+      for (const btn of btns) {
+        if (btn.textContent === key || (key === ' ' && btn.textContent === 'SPACE')) {
+          btn.classList.add('pressed');
+          setTimeout(() => btn.classList.remove('pressed'), 100);
+        }
+      }
+    }
+  });
+}
+
+// ===== Main Loop =====
+let machine;
+let lastTime = 0;
+
+function mainLoop(timestamp) {
+  const dt = lastTime ? timestamp - lastTime : 16;
+  lastTime = timestamp;
+  machine.update(dt);
+  requestAnimationFrame(mainLoop);
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+  machine = new PC1211();
+  buildKeyboard();
+  setupKeyboardInput();
+
+  // Start the BASIC interpreter
+  machine.basic.nextStep = 'WARMSTART';
+
+  requestAnimationFrame(mainLoop);
+
+  // Update shift button visual state
+  const observer = new MutationObserver(() => {
+    document.querySelectorAll('.shift-key').forEach(btn => {
+      btn.classList.toggle('active', machine.shiftActive);
+    });
+  });
+});
+</script>
+</body>
+</html>
