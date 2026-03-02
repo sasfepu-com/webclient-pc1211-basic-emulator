@@ -7,100 +7,41 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-  background: #1a1a2e;
+  background: #2a2a2e;
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  font-family: 'Segoe UI', Arial, sans-serif;
-  color: #ccc;
 }
 #emulator {
-  background: linear-gradient(145deg, #2a2a3a, #1e1e2e);
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-  width: 620px;
-}
-#lcd-container {
-  background: #1a2a1a;
-  border: 2px solid #333;
-  border-radius: 8px;
-  padding: 12px 16px 8px;
-  margin-bottom: 16px;
-}
-#indicators {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 6px;
-  font-size: 10px;
-  font-family: 'Courier New', monospace;
-  height: 14px;
-}
-.indicator { color: #1a3a1a; transition: color 0.15s; }
-.indicator.active { color: #4a4; }
-#lcd { display: block; image-rendering: pixelated; }
-#keyboard {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.kb-row {
-  display: flex;
-  gap: 4px;
-  justify-content: center;
-}
-.key {
-  background: linear-gradient(180deg, #444, #333);
-  border: 1px solid #555;
-  border-radius: 4px;
-  color: #ddd;
-  font-size: 12px;
-  font-family: 'Courier New', monospace;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-width: 38px;
-  height: 34px;
-  padding: 2px 4px;
-  user-select: none;
   position: relative;
+  width: 680px;
+  user-select: none;
 }
-.key:active, .key.pressed { background: linear-gradient(180deg, #555, #666); border-color: #777; }
-.key .shift-label {
-  font-size: 8px;
-  color: #f90;
+#emulator img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+/* LCD canvas overlaid on the photo's LCD area */
+#lcd {
   position: absolute;
-  top: 1px;
-  right: 3px;
+  image-rendering: pixelated;
+  border-radius: 6px;
 }
-.key.wide { min-width: 58px; }
-.key.wider { min-width: 78px; }
-.key.special { background: linear-gradient(180deg, #c44, #a33); border-color: #d55; }
-.key.mode-key { background: linear-gradient(180deg, #448, #336); border-color: #55a; }
-.key.enter-key { background: linear-gradient(180deg, #484, #363); border-color: #5a5; min-width: 68px; }
-.key.shift-key { background: linear-gradient(180deg, #864, #643); border-color: #a86; }
-.key.shift-key.active { background: linear-gradient(180deg, #fa0, #c80); color: #000; }
+/* Invisible clickable key hotspots */
+.hotspot {
+  position: absolute;
+  cursor: pointer;
+  /* border: 1px solid rgba(255,0,0,0.3); /* uncomment to debug */
+}
+.hotspot:active { background: rgba(255,255,255,0.15); border-radius: 3px; }
 </style>
 </head>
 <body>
 <div id="emulator">
-  <div id="lcd-container">
-    <div id="indicators">
-      <span class="indicator" id="ind-shift">SHIFT</span>
-      <span class="indicator" id="ind-def">DEF</span>
-      <span class="indicator" id="ind-pro">PRO</span>
-      <span class="indicator" id="ind-run">RUN</span>
-      <span class="indicator" id="ind-reserve">RESERVE</span>
-      <span class="indicator" id="ind-deg">DEG</span>
-      <span class="indicator" id="ind-rad">RAD</span>
-      <span class="indicator" id="ind-grad">GRAD</span>
-    </div>
-    <canvas id="lcd" width="576" height="36"></canvas>
-  </div>
-  <div id="keyboard"></div>
+  <img id="bg" src="pc1211v2.jpg" alt="Sharp PC-1211" draggable="false">
+  <canvas id="lcd"></canvas>
 </div>
 
 <script>
@@ -156,8 +97,8 @@ const FONT_ROM = [
 0x00,0x60,0x60,0x00,0x00,
 // 0x2F = /
 0x20,0x10,0x08,0x04,0x02,
-// 0x30 = 0
-0x3E,0x51,0x49,0x45,0x3E,
+// 0x30 = 0 (plain oval, no slash)
+0x3E,0x41,0x41,0x41,0x3E,
 // 0x31 = 1
 0x00,0x42,0x7F,0x40,0x00,
 // 0x32 = 2
@@ -218,8 +159,8 @@ const FONT_ROM = [
 0x7F,0x02,0x0C,0x02,0x7F,
 // 0x4E = N
 0x7F,0x04,0x08,0x10,0x7F,
-// 0x4F = O
-0x3E,0x41,0x41,0x41,0x3E,
+// 0x4F = O (top-right corner cut, disconnected tick, gap at row1 right)
+0x3E,0x41,0x41,0x42,0x3D,
 // 0x50 = P
 0x7F,0x09,0x09,0x09,0x06,
 // 0x51 = Q
@@ -294,53 +235,111 @@ const FONT_ROM = [
 ];
 
 // ===== LCD Class =====
+// The real PC-1211 LCD has indicator symbols (DEG, RAD, GRAD, RUN, PRO, etc.)
+// rendered as tiny dot-matrix text on the LCD itself, above the main 24-char line.
 class LCD {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.cols = 24;
-    this.pixelSize = 3;
-    this.pixelGap = 1;
-    this.cellW = 6; // 5 cols + 1 gap
-    this.cellH = 7;
-    // Resize canvas to fit
-    this.canvas.width = this.cols * this.cellW * (this.pixelSize + this.pixelGap);
-    this.canvas.height = this.cellH * (this.pixelSize + this.pixelGap) + 2;
-    this.onColor = '#4a4';
-    this.dimColor = '#1a2a1a';
+    this.px = 3;       // pixel size
+    this.gap = 1;      // gap between pixels
+    this.step = 4;     // px + gap
+    this.cellW = 6;    // 5 cols + 1 gap per character
+    // Indicator row: 5px tall characters, main row: 7px tall, gap between
+    this.indH = 5;     // indicator row height in LCD pixels
+    this.mainH = 7;    // main row height
+    this.rowGap = 3;   // gap between indicator and main rows (in LCD pixels)
+    // Total LCD pixel height: indH + rowGap + mainH + 1 (cursor row)
+    const totalH = this.indH + this.rowGap + this.mainH + 1;
+    this.canvas.width = this.cols * this.cellW * this.step;
+    this.canvas.height = totalH * this.step + 2;
+    this.mainY = (this.indH + this.rowGap) * this.step + 1; // y offset for main chars
+    this.indY = 1;  // y offset for indicator row
+    this.onColor = '#2a3508';
+    this.dimColor = '#9aaa52';
+    this.bgColor = '#9aaa52';
     this.blinkOn = true;
     this.blinkTimer = 0;
     this.blinkInterval = 500;
+    // Indicators state
+    this.indicators = {};
   }
 
+  // Draw a dot (circle) at pixel position
+  drawDot(x, y, on) {
+    this.ctx.fillStyle = on ? this.onColor : this.dimColor;
+    const r = this.px / 2;
+    this.ctx.beginPath();
+    this.ctx.arc(x + r, y + r, r, 0, Math.PI * 2);
+    this.ctx.fill();
+  }
+
+  // Draw a main-row character (7 rows) at column position
   drawChar(charCode, col) {
-    const px = this.pixelSize;
-    const gap = this.pixelGap;
-    const step = px + gap;
-    const x0 = col * this.cellW * step;
+    const x0 = col * this.cellW * this.step;
+    const y0 = this.mainY;
     charCode = charCode & 0x7F;
     if (charCode * 5 + 4 >= FONT_ROM.length) charCode = 0;
     for (let c = 0; c < 5; c++) {
       const data = FONT_ROM[charCode * 5 + c];
-      // Columns drawn left-to-right: col 0 = leftmost
-      const xPx = x0 + c * step;
+      const xPx = x0 + c * this.step;
       for (let r = 0; r < 7; r++) {
         const on = (data >> r) & 1;
-        this.ctx.fillStyle = on ? this.onColor : this.dimColor;
-        this.ctx.fillRect(xPx, r * step + 1, px, px);
+        this.drawDot(xPx, y0 + r * this.step, on);
       }
     }
   }
 
+  // Draw a solid indicator label (not dot-matrix — matches real hardware)
+  drawIndicator(text, xPos, active) {
+    this.ctx.fillStyle = active ? this.onColor : this.dimColor;
+    this.ctx.font = 'bold ' + (this.indH * this.step - 2) + 'px sans-serif';
+    this.ctx.textBaseline = 'top';
+    this.ctx.fillText(text, xPos, this.indY);
+  }
+
   render(displayChars, cursorPos, cursorVisible) {
-    this.ctx.fillStyle = '#0a150a';
+    // Clear entire canvas
+    this.ctx.fillStyle = this.bgColor;
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    // Draw indicator row — positions match the real PC-1211 LCD
+    const ind = this.indicators;
+    const cw = this.canvas.width;
+    this.drawIndicator('DEG', cw * 0.24, ind.deg);
+    this.drawIndicator('RAD', cw * 0.32, ind.rad);
+    this.drawIndicator('GRAD', cw * 0.40, ind.grad);
+    this.drawIndicator('DEF', cw * 0.52, ind.def);
+    this.drawIndicator('RUN', cw * 0.62, ind.run);
+    this.drawIndicator('PRO', cw * 0.72, ind.pro);
+    this.drawIndicator('RESERVE', cw * 0.82, ind.reserve);
+
+    // Draw main character row
     for (let i = 0; i < this.cols; i++) {
       const ch = i < displayChars.length ? displayChars[i] : 0x20;
-      if (i === cursorPos && cursorVisible && this.blinkOn) {
-        this.drawChar(0x7F, i); // block cursor
-      } else {
-        this.drawChar(ch, i);
+      this.drawChar(ch, i);
+      if (i === cursorPos && cursorVisible) {
+        if (i < displayChars.length && displayChars[i] !== 0x20) {
+          // Cursor over a character: blinking full block
+          if (this.blinkOn) {
+            // Draw solid 5x7 block (all dots on)
+            const x0 = i * this.cellW * this.step;
+            for (let row = 0; row < 7; row++) {
+              for (let col = 0; col < 5; col++) {
+                this.drawDot(x0 + col * this.step, this.mainY + row * this.step, true);
+              }
+            }
+          }
+          // When blinkOn is false, the normal character shows through
+        } else {
+          // Cursor past end of text: steady underline (no blink)
+          const x0 = i * this.cellW * this.step;
+          const y0 = this.mainY + 7 * this.step;
+          for (let d = 0; d < 5; d++) {
+            this.drawDot(x0 + d * this.step, y0, true);
+          }
+        }
       }
     }
   }
@@ -353,6 +352,7 @@ class LCD {
     }
   }
 }
+
 
 // ===== BASIC Keyword Tables =====
 const KEYWORDS = [
@@ -470,7 +470,7 @@ class TinyBasic {
         if (upper.startsWith(kw) && kw.length > 0) {
           // Make sure it's not part of a longer identifier
           const after = i + kw.length;
-          if (/[A-Z]/.test(kw[0]) && after < text.length && /[A-Z0-9]/i.test(text[after])) {
+          if (/[A-Z]/.test(kw[0]) && after < text.length && /[A-Z]/i.test(text[after])) {
             continue; // Part of longer word
           }
           out.push(0x80 + k);
@@ -534,7 +534,7 @@ class TinyBasic {
 
     // Check space
     if (this.programEnd + lineData.length > this.program.length - 100) {
-      this.errorMsg = 'MEMORY FULL';
+      this.errorMsg = '3';
       return;
     }
 
@@ -700,7 +700,7 @@ class TinyBasic {
             this._lastStrLeft = this._lastStr;
             left = 0;
           } else {
-            this.expType = 'ERROR'; this.errorMsg = 'TYPE MISMATCH'; return 0;
+            this.expType = 'ERROR'; this.errorMsg = '1'; return 0;
           }
         } else {
           left += this.expr3();
@@ -725,7 +725,7 @@ class TinyBasic {
       else if (b === 0x2F) { // /
         this.advance();
         const d = this.expr4();
-        if (d === 0) { this.expType = 'ERROR'; this.errorMsg = 'DIV BY ZERO'; return 0; }
+        if (d === 0) { this.expType = 'ERROR'; this.errorMsg = '2'; return 0; }
         left /= d;
       } else break;
       if (this.expType === 'ERROR') return 0;
@@ -906,7 +906,7 @@ class TinyBasic {
         this.expType = 'NUMERIC';
         const ai = varIdx + idx;
         if (ai >= 0 && ai < 26) return this.numVars[ai];
-        this.errorMsg = 'SUBSCRIPT ERROR';
+        this.errorMsg = '1';
         this.expType = 'ERROR';
         return 0;
       }
@@ -1009,7 +1009,7 @@ class TinyBasic {
           hasNum = true;
         }
 
-        if (hasNum) {
+        if (hasNum && this.proMode) {
           // Program line — tokenize and store
           const rest = line.substring(i);
           const tokens = this.tokenize(rest.trimStart());
@@ -1019,7 +1019,7 @@ class TinyBasic {
             this.insertLine(lineNum, tokens);
           }
           if (this.errorMsg) {
-            this.outputBuffer = this.errorMsg;
+            this.outputBuffer = this.errorMsg.padStart(16);
             this.errorMsg = '';
             this.nextStep = 'WARMSTART';
           } else {
@@ -1103,20 +1103,20 @@ class TinyBasic {
       case 'LIST':
         return this.doList();
 
-      case 'QWHAT':
-        this.outputBuffer = 'WHAT?';
+      case 'QWHAT':  // ERROR 1: Grammatical (syntax)
+        this.outputBuffer = (this.errorMsg || '1').padStart(16);
         this.nextStep = 'WARMSTART';
         this.running = false;
         return 'ERROR';
 
-      case 'QHOW':
-        this.outputBuffer = 'HOW?';
+      case 'QHOW':   // ERROR 2: Line error
+        this.outputBuffer = '2'.padStart(16);
         this.nextStep = 'WARMSTART';
         this.running = false;
         return 'ERROR';
 
-      case 'QSORRY':
-        this.outputBuffer = 'SORRY';
+      case 'QSORRY':  // ERROR 3: Error in depth
+        this.outputBuffer = '3'.padStart(16);
         this.nextStep = 'WARMSTART';
         this.running = false;
         return 'ERROR';
@@ -1147,6 +1147,7 @@ class TinyBasic {
 
     // Check for keyword token
     if (b >= 0x80) {
+      const savedPos = this.getPos();
       this.advance();
       switch (b) {
         case KW_PRINT: case 0x97: case 0x80+23: return this.go_PRINT(); // ? and '
@@ -1171,14 +1172,45 @@ class TinyBasic {
         case KW_RADIAN: this.angleMode = 'RADIAN'; this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
         case KW_GRAD: this.angleMode = 'GRAD'; this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
         default:
-          this.nextStep = 'QWHAT';
-          return 'ERROR';
+          // Not a statement — back up and try as expression (e.g. COS20)
+          this.setPos(savedPos);
+          break;
       }
     }
 
     // Implicit LET: variable assignment without LET keyword
     if ((b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A)) {
-      return this.go_LET();
+      // Check if it's an assignment (peek for = after variable)
+      const nextB = this.peekByte();
+      if (nextB === 0x24) {
+        // String variable (A$) — check for = after $
+        return this.go_LET();
+      }
+      if (nextB === 0x3D) {
+        return this.go_LET();
+      }
+      // Otherwise treat as expression to evaluate
+    }
+
+    // Direct mode: evaluate expression and display result right-justified
+    if (this.currentLine < 0) {
+      const val = this.expression();
+      if (this.expType === 'ERROR') {
+        this.outputBuffer = (this.errorMsg || '1').padStart(16);
+        this.nextStep = 'WARMSTART';
+        this.running = false;
+        return 'ERROR';
+      }
+      let result;
+      if (this.expType === 'STRING') {
+        result = this._lastStr;
+      } else {
+        result = this.formatNum(val);
+      }
+      // Right-justify to 24 characters
+      this.outputBuffer = result.padStart(24);
+      this.nextStep = 'WARMSTART';
+      return 'PRINT';
     }
 
     this.nextStep = 'QWHAT';
@@ -1210,7 +1242,7 @@ class TinyBasic {
       // Expression
       const val = this.expression();
       if (this.expType === 'ERROR') {
-        this.outputBuffer = this.errorMsg || 'ERROR';
+        this.outputBuffer = (this.errorMsg || '1').padStart(16);
         this.nextStep = 'WARMSTART';
         this.running = false;
         return 'ERROR';
@@ -1292,6 +1324,12 @@ class TinyBasic {
       } else {
         this.nextStep = 'QWHAT'; return 'ERROR';
       }
+      // In direct mode, display the assigned value right-justified
+      if (this.currentLine < 0) {
+        this.outputBuffer = this._lastStr.padStart(24);
+        this.nextStep = 'WARMSTART';
+        return 'PRINT';
+      }
       this.nextStep = 'RUN_NEXT_STATEMENT';
       return 'OK';
     }
@@ -1307,7 +1345,7 @@ class TinyBasic {
       this.advance();
       const val = this.expression();
       if (this.expType === 'ERROR') {
-        this.outputBuffer = this.errorMsg || 'ERROR';
+        this.outputBuffer = (this.errorMsg || '1').padStart(16);
         this.nextStep = 'WARMSTART'; return 'ERROR';
       }
       const ai = varIdx + idx;
@@ -1321,10 +1359,16 @@ class TinyBasic {
     this.advance();
     const val = this.expression();
     if (this.expType === 'ERROR') {
-      this.outputBuffer = this.errorMsg || 'ERROR';
+      this.outputBuffer = (this.errorMsg || '1').padStart(16);
       this.nextStep = 'WARMSTART'; return 'ERROR';
     }
     this.numVars[varIdx] = val;
+    // In direct mode, display the assigned value right-justified
+    if (this.currentLine < 0) {
+      this.outputBuffer = this.formatNum(val).padStart(24);
+      this.nextStep = 'WARMSTART';
+      return 'PRINT';
+    }
     this.nextStep = 'RUN_NEXT_STATEMENT';
     return 'OK';
   }
@@ -1332,7 +1376,7 @@ class TinyBasic {
   go_IF() {
     const val = this.expression();
     if (this.expType === 'ERROR') {
-      this.outputBuffer = this.errorMsg || 'ERROR';
+      this.outputBuffer = (this.errorMsg || '1').padStart(16);
       this.nextStep = 'WARMSTART'; return 'ERROR';
     }
     this.skipSpaces();
@@ -1399,7 +1443,7 @@ class TinyBasic {
     this.skipSpaces();
     const lineNum = this.parseLineNum();
     if (lineNum < 0) { this.nextStep = 'QWHAT'; return 'ERROR'; }
-    if (this.stack.length >= this.maxStack) { this.nextStep = 'QSORRY'; return 'ERROR'; }
+    if (this.stack.length >= this.maxStack) { this.errorMsg = '3'; this.nextStep = 'QWHAT'; return 'ERROR'; }
     this.stack.push({
       type: 'GOSUB',
       currentLine: this.currentLine,
@@ -1423,6 +1467,7 @@ class TinyBasic {
         return 'OK';
       }
     }
+    this.errorMsg = '4';
     this.nextStep = 'QWHAT';
     return 'ERROR';
   }
@@ -1461,7 +1506,7 @@ class TinyBasic {
     // Remove any existing FOR frame for same variable
     this.stack = this.stack.filter(f => !(f.type === 'FOR' && f.varIdx === varIdx));
 
-    if (this.stack.length >= this.maxStack) { this.nextStep = 'QSORRY'; return 'ERROR'; }
+    if (this.stack.length >= this.maxStack) { this.errorMsg = '3'; this.nextStep = 'QWHAT'; return 'ERROR'; }
 
     this.stack.push({
       type: 'FOR',
@@ -1503,6 +1548,7 @@ class TinyBasic {
         return 'OK';
       }
     }
+    this.errorMsg = '4';
     this.nextStep = 'QWHAT';
     return 'ERROR';
   }
@@ -1543,7 +1589,7 @@ class TinyBasic {
     }
     const ln = (this.program[this._listPos] << 8) | this.program[this._listPos + 1];
     const len = this.program[this._listPos + 2];
-    let s = ln + ' ';
+    let s = ln + ':';
     s += this.expandTokens(this.program, this._listPos + 3, this._listPos + len);
     this.outputBuffer = s;
     this._listPos += len;
@@ -1632,6 +1678,7 @@ class PC1211 {
     this.basic = new TinyBasic();
     this.lcd = new LCD(document.getElementById('lcd'));
     this.mode = 'RUN'; // RUN, PRO, RESERVE, DEF
+    this.basic.proMode = false;
     this.shiftActive = false;
     this.inputBuffer = '';
     this.cursorPos = 0;
@@ -1653,20 +1700,22 @@ class PC1211 {
   }
 
   updateIndicators() {
-    document.getElementById('ind-shift').classList.toggle('active', this.shiftActive);
-    document.getElementById('ind-def').classList.toggle('active', this.mode === 'DEF');
-    document.getElementById('ind-pro').classList.toggle('active', this.mode === 'PRO');
-    document.getElementById('ind-run').classList.toggle('active', this.mode === 'RUN');
-    document.getElementById('ind-reserve').classList.toggle('active', this.mode === 'RESERVE');
-    document.getElementById('ind-deg').classList.toggle('active', this.basic.angleMode === 'DEGREE');
-    document.getElementById('ind-rad').classList.toggle('active', this.basic.angleMode === 'RADIAN');
-    document.getElementById('ind-grad').classList.toggle('active', this.basic.angleMode === 'GRAD');
+    this.lcd.indicators = {
+      deg: this.basic.angleMode === 'DEGREE',
+      rad: this.basic.angleMode === 'RADIAN',
+      grad: this.basic.angleMode === 'GRAD',
+      run: this.mode === 'RUN',
+      pro: this.mode === 'PRO',
+      reserve: this.mode === 'RESERVE',
+      def: this.mode === 'DEF',
+    };
   }
 
   switchMode() {
     const modes = ['RUN', 'PRO', 'RESERVE', 'DEF'];
     const idx = modes.indexOf(this.mode);
     this.mode = modes[(idx + 1) % 4];
+    this.basic.proMode = (this.mode === 'PRO');
     this.inputBuffer = '';
     this.cursorPos = 0;
     this.basic.outputBuffer = '';
@@ -1679,7 +1728,7 @@ class PC1211 {
   }
 
   pressKey(key) {
-    if (!this.powered) return;
+    if (!this.powered && key !== 'ON') return;
 
     // Handle SHIFT
     if (key === 'SHIFT') {
@@ -1718,6 +1767,7 @@ class PC1211 {
       this.powered = false;
       this.inputBuffer = '';
       this.basic.outputBuffer = '';
+      this.lcd.indicators = {};
       return;
     }
 
@@ -1729,9 +1779,11 @@ class PC1211 {
         // Continue listing
         return;
       }
-      if (this.basic.nextStep === 'PROMPT') {
+      if (this.basic.nextStep === 'WARMSTART' || this.basic.nextStep === 'PROMPT') {
+        // Restore previous input for editing
         this.basic.inputMode = true;
-        this.inputBuffer = '';
+        this.basic.nextStep = 'GETLN';
+        this.inputBuffer = this._lastInput || '';
         this.cursorPos = 0;
       }
       return;
@@ -1780,10 +1832,10 @@ class PC1211 {
       } else if (ch === 'DOWN') {
         if (this.mode === 'PRO') this.listNext();
       } else if (ch === 'DEL') {
-        if (this.cursorPos > 0) {
-          this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos - 1) +
-                            this.inputBuffer.substring(this.cursorPos);
-          this.cursorPos--;
+        // Delete char at cursor, shift right text left
+        if (this.cursorPos < this.inputBuffer.length) {
+          this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos) +
+                            this.inputBuffer.substring(this.cursorPos + 1);
         }
       } else if (ch === 'INS') {
         // Toggle insert mode (simplified: insert a space)
@@ -1791,6 +1843,10 @@ class PC1211 {
                           this.inputBuffer.substring(this.cursorPos);
       } else if (ch === 'SQR') {
         this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos) + '\u221A' +
+                          this.inputBuffer.substring(this.cursorPos);
+        this.cursorPos++;
+      } else if (ch === 'PI') {
+        this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos) + '\u03C0' +
                           this.inputBuffer.substring(this.cursorPos);
         this.cursorPos++;
       } else if (ch.length === 1) {
@@ -1808,6 +1864,8 @@ class PC1211 {
   }
 
   submitInput() {
+    // Save input for recall after result display
+    this._lastInput = this.inputBuffer;
     let line = this.inputBuffer;
     // Replace special characters with tokens for the interpreter
     line = line.replace(/\u221A/g, '\x18'); // √ → SQR char
@@ -1838,15 +1896,23 @@ class PC1211 {
     let cPos = -1;
 
     if (this.basic.inputMode || this.basic.nextStep === 'GETLN' || this.basic.nextStep === 'INPUT_WAIT') {
-      // Show prompt + input buffer
-      let prompt = '';
+      // Show input buffer with cursor
       if (this.basic.nextStep === 'INPUT_WAIT') {
-        prompt = this.basic.outputBuffer;
+        text = this.basic.outputBuffer + this.inputBuffer;
+        cPos = this.basic.outputBuffer.length + this.cursorPos;
       } else if (this.basic.nextStep === 'GETLN') {
-        prompt = this.mode === 'PRO' ? '' : '>';
+        if (this.inputBuffer.length === 0 && this.mode !== 'PRO') {
+          // Show > prompt when empty, no cursor
+          text = '>';
+          cPos = -1;
+        } else {
+          text = this.inputBuffer;
+          cPos = this.cursorPos;
+        }
+      } else {
+        text = this.inputBuffer;
+        cPos = this.cursorPos;
       }
-      text = prompt + this.inputBuffer;
-      cPos = prompt.length + this.cursorPos;
     } else if (this.basic.outputBuffer) {
       text = this.basic.outputBuffer;
       cPos = -1;
@@ -1886,8 +1952,8 @@ class PC1211 {
     }
 
     // Run BASIC steps
-    if (this.basic.running || (this.basic.nextStep !== 'GETLN' && this.basic.nextStep !== 'PROMPT' &&
-        this.basic.nextStep !== 'INPUT_WAIT' && this.basic.nextStep !== 'WARMSTART' &&
+    if (this.basic.running || (this.basic.nextStep !== 'GETLN' &&
+        this.basic.nextStep !== 'INPUT_WAIT' &&
         !this.waitForKey)) {
 
       // Handle PAUSE timer
@@ -1938,8 +2004,8 @@ class PC1211 {
           if (this.basic.nextStep === 'GETLN' || this.basic.nextStep === 'PROMPT' ||
               this.basic.nextStep === 'INPUT_WAIT') break;
         }
-        // When program ends, show last output
-        if (this.basic._programOutputDone) {
+        // When program ends, show last output (but not if an error just occurred)
+        if (this.basic._programOutputDone && !this.waitForKey) {
           this.basic._programOutputDone = false;
           if (this._lastProgramOutput) {
             this.basic.outputBuffer = this._lastProgramOutput;
@@ -1978,116 +2044,114 @@ class PC1211 {
   }
 }
 
-// ===== Keyboard UI =====
+// ===== Keyboard Hotspots =====
+// Key positions as percentages of the image (1066x800)
+// Format: [x%, y%, w%, h%, key]
+const KEY_MAP = [
+  // Row 1: OFF, ON, [gap], down, up, (, sqrt, ), <, >, SHFT
+  [3.2, 46.7,4.8, 6.0, 'OFF'],
+  [9.6, 46.7,4.8, 6.0, 'ON'],
+  [18.5, 46.7,4.2, 6.0, 'DOWN'],
+  [23.5, 46.7,4.2, 6.0, 'UP'],
+  [28.8, 46.7,4.2, 6.0, '('],
+  [33.8, 46.7,4.2, 6.0, 'SQR'],
+  [38.8, 46.7,4.2, 6.0, ')'],
+  [43.8, 46.7,4.2, 6.0, '<'],
+  [49.5, 46.7,4.2, 6.0, '>'],
+  [54.5, 46.7,4.2, 6.0, 'RIGHT'],
+  [60.0, 46.7,5.2, 6.0, 'SHIFT'],
+  // Row 2: Q W E R T Y U I O P
+  [3.2, 57.0,4.8, 6.0, 'Q'],
+  [9.6, 57.0,4.8, 6.0, 'W'],
+  [16.0, 57.0,4.8, 6.0, 'E'],
+  [22.4, 57.0,4.8, 6.0, 'R'],
+  [28.8, 57.0,4.8, 6.0, 'T'],
+  [35.2, 57.0,4.8, 6.0, 'Y'],
+  [41.6, 57.0,4.8, 6.0, 'U'],
+  [48.0, 57.0,4.8, 6.0, 'I'],
+  [54.4, 57.0,4.8, 6.0, 'O'],
+  [60.8, 57.0,4.8, 6.0, 'P'],
+  // Row 3: A S D F G H J K L =
+  [3.2, 68.5,4.8, 6.0, 'A'],
+  [9.6, 68.5,4.8, 6.0, 'S'],
+  [16.0, 68.5,4.8, 6.0, 'D'],
+  [22.4, 68.5,4.8, 6.0, 'F'],
+  [28.8, 68.5,4.8, 6.0, 'G'],
+  [35.2, 68.5,4.8, 6.0, 'H'],
+  [41.6, 68.5,4.8, 6.0, 'J'],
+  [48.0, 68.5,4.8, 6.0, 'K'],
+  [54.4, 68.5,4.8, 6.0, 'L'],
+  [60.8, 68.5,4.8, 6.0, '='],
+  // Row 4: Z X C V B N M SPC ENTER
+  [3.2, 79.5,4.8, 6.0, 'Z'],
+  [9.6, 79.5,4.8, 6.0, 'X'],
+  [16.0, 79.5,4.8, 6.0, 'C'],
+  [22.4, 79.5,4.8, 6.0, 'V'],
+  [28.8, 79.5,4.8, 6.0, 'B'],
+  [35.2, 79.5,4.8, 6.0, 'N'],
+  [41.6, 79.5,4.8, 6.0, 'M'],
+  [48.0, 79.5,5.5, 6.0, ' '],
+  [54.5, 79.5,10.5, 6.0, 'ENTER'],
+  // Right numpad row 1: 7 8 9 / CL
+  [67.0, 44.5,4.4, 6.0, '7'],
+  [73.5, 44.5,4.4, 6.0, '8'],
+  [80.0, 44.5,4.4, 6.0, '9'],
+  [87.0, 44.5,4.4, 6.0, '/'],
+  [92.5, 44.5,5.2, 6.0, 'CLR'],
+  // Right numpad row 2: 4 5 6 * MODE
+  [67.0, 57.0,4.4, 6.0, '4'],
+  [73.5, 57.0,4.4, 6.0, '5'],
+  [80.0, 57.0,4.4, 6.0, '6'],
+  [87.0, 57.0,4.4, 6.0, '*'],
+  [92.5, 57.0,5.2, 6.0, 'MODE'],
+  // Right numpad row 3: 1 2 3 - DEL
+  [67.0, 72.0,4.4, 6.0, '1'],
+  [73.5, 72.0,4.4, 6.0, '2'],
+  [80.0, 72.0,4.4, 6.0, '3'],
+  [87.0, 72.0,4.4, 6.0, '-'],
+  [93.5, 72.0,4.2, 6.0, 'LEFT'],
+  // Right numpad row 4: 0 . Exp + INS
+  [67.0, 85.0,4.4, 6.0, '0'],
+  [73.5, 85.0,4.4, 6.0, '.'],
+  [80.0, 85.0,4.4, 6.0, 'E'],
+  [87.0, 85.0,4.4, 6.0, '+'],
+  [93.5, 85.0,4.2, 6.0, 'RIGHT'],
+];
+
+// LCD position as percentage of cropped image (955x577)
+// y starts at DEG/RUN labels, h extends to bottom of character display
+// LCD position as percentage of cropped image (995x395)
+const LCD_POS = { x: 6.5, y: 13.5, w: 64.5, h: 15.0 };
+
 function buildKeyboard() {
-  const kb = document.getElementById('keyboard');
-
-  const rows = [
-    // Row 1: Special keys
-    [
-      { label: 'ON', key: 'ON', cls: 'special' },
-      { label: 'OFF', key: 'OFF', cls: 'special' },
-      { label: 'BRK', key: 'BRK', cls: 'special' },
-      { label: 'MODE', key: 'MODE', cls: 'mode-key' },
-      { label: 'DEF', key: 'SHIFT', shift: true, cls: 'mode-key' },
-      { label: '\u2190', key: 'LEFT' },
-      { label: '\u2192', key: 'RIGHT' },
-      { label: '\u2191', key: 'UP' },
-      { label: '\u2193', key: 'DOWN' },
-      { label: 'CLR', key: 'CLR' },
-    ],
-    // Row 2: Q-P with shift symbols
-    [
-      { label: 'Q', key: 'Q', shift: '!' },
-      { label: 'W', key: 'W', shift: '"' },
-      { label: 'E', key: 'E', shift: '#' },
-      { label: 'R', key: 'R', shift: '$' },
-      { label: 'T', key: 'T', shift: '%' },
-      { label: 'Y', key: 'Y', shift: '&' },
-      { label: 'U', key: 'U', shift: '?' },
-      { label: 'I', key: 'I', shift: ':' },
-      { label: 'O', key: 'O', shift: ',' },
-      { label: 'P', key: 'P', shift: ';' },
-    ],
-    // Row 3: A-L + ENTER
-    [
-      { label: 'A', key: 'A' },
-      { label: 'S', key: 'S' },
-      { label: 'D', key: 'D' },
-      { label: 'F', key: 'F' },
-      { label: 'G', key: 'G' },
-      { label: 'H', key: 'H' },
-      { label: 'J', key: 'J' },
-      { label: 'K', key: 'K' },
-      { label: 'L', key: 'L' },
-      { label: 'ENTER', key: 'ENTER', cls: 'enter-key' },
-    ],
-    // Row 4: SHIFT + Z-M + SQR
-    [
-      { label: 'SHIFT', key: 'SHIFT', cls: 'shift-key wide' },
-      { label: 'Z', key: 'Z' },
-      { label: 'X', key: 'X' },
-      { label: 'C', key: 'C' },
-      { label: 'V', key: 'V' },
-      { label: 'B', key: 'B' },
-      { label: 'N', key: 'N' },
-      { label: 'M', key: 'M' },
-      { label: 'SPACE', key: ' ', cls: 'wide' },
-      { label: '\u221A', key: 'SQR' },
-    ],
-    // Row 5: Numbers and operators
-    [
-      { label: '1', key: '1' },
-      { label: '2', key: '2' },
-      { label: '3', key: '3' },
-      { label: '4', key: '4' },
-      { label: '5', key: '5' },
-      { label: '6', key: '6' },
-      { label: '7', key: '7' },
-      { label: '8', key: '8' },
-      { label: '9', key: '9' },
-      { label: '0', key: '0' },
-    ],
-    // Row 6: Operators
-    [
-      { label: '.', key: '.' },
-      { label: '+', key: '+' },
-      { label: '-', key: '-' },
-      { label: '\u00D7', key: '*' },
-      { label: '\u00F7', key: '/' },
-      { label: '(', key: '(', shift: '<' },
-      { label: ')', key: ')', shift: '>' },
-      { label: '=', key: '=' },
-      { label: '"', key: '"' },
-      { label: '$', key: '$' },
-    ],
-  ];
-
-  for (const row of rows) {
-    const rowDiv = document.createElement('div');
-    rowDiv.className = 'kb-row';
-    for (const k of row) {
-      const btn = document.createElement('button');
-      btn.className = 'key' + (k.cls ? ' ' + k.cls : '');
-      btn.textContent = k.label;
-      if (k.shift && k.shift !== true) {
-        const shiftLabel = document.createElement('span');
-        shiftLabel.className = 'shift-label';
-        shiftLabel.textContent = k.shift;
-        btn.appendChild(shiftLabel);
-      }
-      btn.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        machine.pressKey(k.key);
-      });
-      btn.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        machine.pressKey(k.key);
-      });
-      rowDiv.appendChild(btn);
-    }
-    kb.appendChild(rowDiv);
+  const emu = document.getElementById('emulator');
+  for (const [x, y, w, h, key] of KEY_MAP) {
+    const div = document.createElement('div');
+    div.className = 'hotspot';
+    div.style.left = x + '%';
+    div.style.top = y + '%';
+    div.style.width = w + '%';
+    div.style.height = h + '%';
+    div.addEventListener('mousedown', (e) => { e.preventDefault(); machine.pressKey(key); });
+    div.addEventListener('touchstart', (e) => { e.preventDefault(); machine.pressKey(key); });
+    emu.appendChild(div);
   }
+}
+
+function positionLCD() {
+  const lcd = document.getElementById('lcd');
+  const img = document.getElementById('bg');
+  function adjustLCD() {
+    const imgW = img.clientWidth;
+    const imgH = img.clientHeight;
+    lcd.style.left = (imgW * LCD_POS.x / 100) + 'px';
+    lcd.style.top = (imgH * LCD_POS.y / 100) + 'px';
+    lcd.style.width = (imgW * LCD_POS.w / 100) + 'px';
+    lcd.style.height = (imgH * LCD_POS.h / 100) + 'px';
+  }
+  if (img.complete) adjustLCD();
+  img.addEventListener('load', adjustLCD);
+  window.addEventListener('resize', adjustLCD);
 }
 
 // ===== Physical Keyboard Mapping =====
@@ -2143,20 +2207,11 @@ function mainLoop(timestamp) {
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   machine = new PC1211();
+  positionLCD();
   buildKeyboard();
   setupKeyboardInput();
-
-  // Start the BASIC interpreter
   machine.basic.nextStep = 'WARMSTART';
-
   requestAnimationFrame(mainLoop);
-
-  // Update shift button visual state
-  const observer = new MutationObserver(() => {
-    document.querySelectorAll('.shift-key').forEach(btn => {
-      btn.classList.toggle('active', machine.shiftActive);
-    });
-  });
 });
 </script>
 </body>
