@@ -251,9 +251,9 @@ class LCD {
     this.step = 4;     // px + gap
     this.cellW = 6;    // 5 cols + 1 gap per character
     // Indicator row: 5px tall characters, main row: 7px tall, gap between
-    this.indH = 5;     // indicator row height in LCD pixels
-    this.mainH = 7;    // main row height
-    this.rowGap = 3;   // gap between indicator and main rows (in LCD pixels)
+    this.indH = 4;     // indicator row height in LCD pixels
+    this.mainH = 8;    // main row height
+    this.rowGap = 2;   // gap between indicator and main rows (in LCD pixels)
     // Total LCD pixel height: indH + rowGap + mainH + 1 (cursor row)
     const totalH = this.indH + this.rowGap + this.mainH + 1;
     this.canvas.width = this.cols * this.cellW * this.step;
