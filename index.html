@@ -47,6 +47,7 @@ body {
   <img id="bg" src="pc1211v2.jpg" alt="Sharp PC-1211" draggable="false">
   <canvas id="lcd"></canvas>
 </div>
+<input type="file" id="cload-file" accept=".bas,.txt" style="display:none">
 
 <script>
 "use strict";
@@ -64,11 +65,15 @@ const FONT_ROM = [
 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
 // 0x18 = SQR symbol (√)
-0x10,0x20,0x1C,0x03,0x01,
+0x10,0x20,0x7F,0x01,0x01,
 // 0x19 = PI symbol (π)
 0x42,0x3E,0x02,0x3E,0x02,
-// 0x1A-0x1F
-0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
+// 0x1A = EXP symbol (E with double-wide vertical bar)
+0x7F,0x7F,0x49,0x49,0x49,
+// 0x1B = ¥ (yen)
+0x01,0x2A,0x7C,0x2A,0x01,
+// 0x1C-0x1F
+0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0, 0,0,0,0,0,
 // 0x20 = space
 0,0,0,0,0,
 // 0x21 = !
@@ -359,31 +364,41 @@ class LCD {
 
 
 // ===== BASIC Keyword Tables =====
+// Longer prefixes before shorter ones to avoid partial matches
 const KEYWORDS = [
-  'BEEP','BYE','INPUT','IF','FOR','GOTO','GOSUB',
-  'LIST','LET','LOAD','MEM','NEXT','NEW','PRINT',
-  'PAUSE','POKE','RUN','RETURN','REM','STOP',
-  'SAVE','USING','FILES','?',"'",'DWRITE',
-  'PINMODE','DELAY','END','RSEED','CHAIN',
-  'RADIAN','DEGREE','GRAD','TO','STEP',
-  // Functions start at index 36 (0x24)
-  'SIN','COS','TAN','ASN','ACS','ATN','LN','LOG',
-  'EXP','PEEK','ABS','AREAD','DREAD','RND','SGN','INT',
-  'DEG','DMS','SQR'
+  // Commands
+  'INPUT#','INPUT','PRINT#','PRINT',  // # variants first
+  'CLOAD?','CLOAD','CSAVE',           // ? variant first
+  'AREAD','BEEP','CHAIN','CLEAR','CONT','DEBUG',
+  'DEGREE','END','FOR','GOSUB','GOTO','GRAD',
+  'IF','LET','LIST','MEM','NEW','NEXT',
+  'PAUSE','RADIAN','REM','RETURN','RUN',
+  'STEP','STOP','THEN','TO','USING',
+  // Functions (contiguous block for range check)
+  'ABS','ACS','ASN','ATN','COS',
+  'DEG','DMS','EXP','INT','LN','LOG',
+  'SGN','SIN','TAN'
 ];
 
 // Token values: 0x80 + index
-const KW = {};
-KEYWORDS.forEach((k, i) => KW['KW_' + k.replace(/[?']/g, m => m === '?' ? 'QMARK' : 'QUOTE')] = 0x80 + i);
-// Convenient aliases
-const KW_BEEP=0x80, KW_INPUT=0x82, KW_IF=0x83, KW_FOR=0x84, KW_GOTO=0x85, KW_GOSUB=0x86,
-      KW_LIST=0x87, KW_LET=0x88, KW_MEM=0x8A, KW_NEXT=0x8B, KW_NEW=0x8C, KW_PRINT=0x8D,
-      KW_PAUSE=0x8E, KW_RUN=0x90, KW_RETURN=0x91, KW_REM=0x92, KW_STOP=0x93,
-      KW_USING=0x95, KW_END=0x9C, KW_RADIAN=0x9F, KW_DEGREE=0xA0, KW_GRAD=0xA1,
-      KW_TO=0xA2, KW_STEP=0xA3;
-const KF_SIN=0xA4, KF_COS=0xA5, KF_TAN=0xA6, KF_ASN=0xA7, KF_ACS=0xA8, KF_ATN=0xA9,
-      KF_LN=0xAA, KF_LOG=0xAB, KF_EXP=0xAC, KF_ABS=0xAE, KF_RND=0xB1, KF_SGN=0xB2,
-      KF_INT=0xB3, KF_DEG=0xB4, KF_DMS=0xB5, KF_SQR=0xB6;
+// Commands
+const KW_INPUT_HASH=0x80, KW_INPUT=0x81, KW_PRINT_HASH=0x82, KW_PRINT=0x83,
+      KW_CLOAD_Q=0x84, KW_LOAD=0x85, KW_SAVE=0x86,
+      KW_BEEP=0x88, KW_CHAIN=0x89, KW_CLEAR=0x8A,
+      KW_CONT=0x8B, KW_DEBUG=0x8C, KW_DEGREE=0x8D,
+      KW_END=0x8E, KW_FOR=0x8F, KW_GOSUB=0x90,
+      KW_GOTO=0x91, KW_GRAD=0x92, KW_IF=0x93,
+      KW_LET=0x94, KW_LIST=0x95, KW_MEM=0x96,
+      KW_NEW=0x97, KW_NEXT=0x98, KW_PAUSE=0x99,
+      KW_RADIAN=0x9A, KW_REM=0x9B, KW_RETURN=0x9C,
+      KW_RUN=0x9D, KW_STEP=0x9E, KW_STOP=0x9F,
+      KW_THEN=0xA0, KW_TO=0xA1, KW_USING=0xA2;
+// Functions (contiguous range)
+const KF_ABS=0xA3, KF_ACS=0xA4, KF_ASN=0xA5, KF_ATN=0xA6,
+      KF_COS=0xA7, KF_DEG=0xA8, KF_DMS=0xA9, KF_EXP=0xAA,
+      KF_INT=0xAB, KF_LN=0xAC, KF_LOG=0xAD, KF_SGN=0xAE,
+      KF_SIN=0xAF, KF_TAN=0xB0;
+const KF_FIRST = KF_ABS, KF_LAST = KF_TAN;
 
 const RELOPS = ['>=','<>','>','=','<=','<','!='];
 
@@ -494,11 +509,13 @@ class TinyBasic {
   }
 
   // Expand tokens back to text for display
-  expandTokens(tokens, start, end) {
+  expandTokens(tokens, start, end, forDisplay = true) {
     let s = '';
     for (let i = start; i < end; i++) {
       const b = tokens[i];
-      if (b >= 0x80 && (b - 0x80) < KEYWORDS.length) {
+      if (b === KF_EXP && forDisplay) {
+        s += '\x1A'; // EXP display character
+      } else if (b >= 0x80 && (b - 0x80) < KEYWORDS.length) {
         s += KEYWORDS[b - 0x80] + ' ';
       } else if (b === NL) {
         break;
@@ -828,17 +845,19 @@ class TinyBasic {
       let numStr = '';
       while ((this.curByte() >= 0x30 && this.curByte() <= 0x39) ||
              this.curByte() === 0x2E || this.curByte() === 0x45 || this.curByte() === 0x65 ||
+             this.curByte() === KF_EXP ||
              ((this.curByte() === 0x2B || this.curByte() === 0x2D) &&
               (numStr.endsWith('E') || numStr.endsWith('e')))) {
-        numStr += String.fromCharCode(this.curByte());
+        // KF_EXP token in numeric context = scientific notation (1EXP2 = 1e2 = 100)
+        numStr += this.curByte() === KF_EXP ? 'E' : String.fromCharCode(this.curByte());
         this.advance();
       }
       this.expType = 'NUMERIC';
       return parseFloat(numStr) || 0;
     }
 
-    // Functions (tokens >= KF_SIN)
-    if (b >= KF_SIN && b <= KF_SQR) {
+    // Functions (token range KF_FIRST..KF_LAST) or √ character (0x18)
+    if ((b >= KF_FIRST && b <= KF_LAST) || b === 0x18) {
       this.advance();
       this.skipSpaces();
       let val;
@@ -862,10 +881,9 @@ class TinyBasic {
         case KF_LOG: return Math.log10(val);
         case KF_EXP: return Math.exp(val);
         case KF_ABS: return Math.abs(val);
-        case KF_RND: return Math.random() * val;
         case KF_SGN: return val > 0 ? 1 : val < 0 ? -1 : 0;
         case KF_INT: return Math.floor(val);
-        case KF_SQR: return Math.sqrt(val);
+        case 0x18:   return Math.sqrt(val); // √ character
         case KF_DEG: {
           // DMS to decimal degrees
           const d = Math.floor(Math.abs(val));
@@ -901,14 +919,14 @@ class TinyBasic {
         return 0;
       }
 
-      // Array: A(n)
+      // Array: A(n) — on PC-1211, A(1)=A, A(2)=B, etc.
       if (this.curByte() === 0x28) { // (
         this.advance();
         const idx = Math.floor(this.expression());
         this.skipSpaces();
         if (this.curByte() === 0x29) this.advance();
         this.expType = 'NUMERIC';
-        const ai = varIdx + idx;
+        const ai = varIdx + idx - 1;
         if (ai >= 0 && ai < 26) return this.numVars[ai];
         this.errorMsg = '1';
         this.expType = 'ERROR';
@@ -930,22 +948,30 @@ class TinyBasic {
       return this.formatUsing(n);
     }
     if (Number.isNaN(n)) return 'ERROR';
-    if (!Number.isFinite(n)) return n > 0 ? '1.+10' : '-1.+10';
+    if (!Number.isFinite(n)) return n > 0 ? '1.\x1A 10' : '-1.\x1A 10';
     if (n === 0) return '0.';
 
     // Use toPrecision for up to 10 significant digits
     let s = n.toPrecision(10);
-    // Remove trailing zeros after decimal point
-    if (s.includes('.') && !s.includes('e') && !s.includes('E')) {
+
+    // Check if scientific notation
+    const expMatch = s.match(/^(-?)(\d\.\d+)[eE]([+-]?\d+)$/);
+    if (expMatch) {
+      const sign = expMatch[1];
+      const mantissa = expMatch[2];
+      const exp = parseInt(expMatch[3], 10);
+      const expSign = exp < 0 ? '-' : ' ';
+      return sign + mantissa + '\x1A' + expSign + Math.abs(exp);
+    }
+
+    // Non-scientific: remove trailing zeros after decimal point
+    if (s.includes('.')) {
       s = s.replace(/0+$/, '');
     }
-    // Ensure trailing dot if no exponent
-    if (!s.includes('.') && !s.includes('e') && !s.includes('E')) {
+    // Ensure trailing dot
+    if (!s.includes('.')) {
       s += '.';
     }
-    // Format exponent PC-1211 style
-    s = s.replace(/e\+?(-?)0*(\d+)/, (_, sign, digits) => '+' + sign + digits);
-    s = s.replace(/E\+?(-?)0*(\d+)/, (_, sign, digits) => '+' + sign + digits);
     return s;
   }
 
@@ -994,6 +1020,10 @@ class TinyBasic {
 
       case 'GETLN':
         // Waiting for input — do nothing
+        return 'WAITING';
+
+      case 'CLOAD_WAIT':
+        // Waiting for file picker — do nothing
         return 'WAITING';
 
       case 'GETLN_END': {
@@ -1100,6 +1130,12 @@ class TinyBasic {
         } else {
           this.numVars[varIdx] = parseFloat(val) || 0;
         }
+        // Check for more prompt/variable pairs: ,"prompt";var
+        this.skipSpaces();
+        if (this.curByte() === 0x2C) { // ,
+          this.advance();
+          return this.go_INPUT();
+        }
         this.nextStep = 'RUN_NEXT_STATEMENT';
         return 'OK';
       }
@@ -1108,19 +1144,19 @@ class TinyBasic {
         return this.doList();
 
       case 'QWHAT':  // ERROR 1: Grammatical (syntax)
-        this.outputBuffer = (this.errorMsg || '1').padStart(16);
+        this.outputBuffer = ((this.errorMsg || '1') + '...............').padStart(24);
         this.nextStep = 'WARMSTART';
         this.running = false;
         return 'ERROR';
 
       case 'QHOW':   // ERROR 2: Line error
-        this.outputBuffer = '2'.padStart(16);
+        this.outputBuffer = '2...............'.padStart(24);
         this.nextStep = 'WARMSTART';
         this.running = false;
         return 'ERROR';
 
       case 'QSORRY':  // ERROR 3: Error in depth
-        this.outputBuffer = '3'.padStart(16);
+        this.outputBuffer = '3...............'.padStart(24);
         this.nextStep = 'WARMSTART';
         this.running = false;
         return 'ERROR';
@@ -1149,13 +1185,32 @@ class TinyBasic {
       return this.interpretStatement();
     }
 
+    // Line label: "X": — skip the label and colon, continue with next statement
+    if (b === 0x22) {
+      const savedPos = this.getPos();
+      this.advance();
+      while (this.curByte() !== 0x22 && this.curByte() !== NL && this.curByte() !== 0) {
+        this.advance();
+      }
+      if (this.curByte() === 0x22) {
+        this.advance();
+        this.skipSpaces();
+        if (this.curByte() === 0x3A) {
+          this.advance(); // skip the :
+          return this.interpretStatement();
+        }
+      }
+      // Not a label — restore position
+      this.setPos(savedPos);
+    }
+
     // Check for keyword token
     if (b >= 0x80) {
       const savedPos = this.getPos();
       this.advance();
       switch (b) {
-        case KW_PRINT: case 0x97: case 0x80+23: return this.go_PRINT(); // ? and '
-        case KW_INPUT: return this.go_INPUT();
+        case KW_PRINT: case KW_PRINT_HASH: return this.go_PRINT();
+        case KW_INPUT: case KW_INPUT_HASH: return this.go_INPUT();
         case KW_LET: return this.go_LET();
         case KW_IF: return this.go_IF();
         case KW_GOTO: return this.go_GOTO();
@@ -1166,12 +1221,34 @@ class TinyBasic {
         case KW_RUN: return this.go_RUN();
         case KW_LIST: return this.go_LIST();
         case KW_NEW: return this.go_NEW();
+        case KW_LOAD: case KW_CLOAD_Q: return this.go_CLOAD();
+        case KW_SAVE: return this.go_CSAVE();
         case KW_MEM: return this.go_MEM();
         case KW_REM: return this.go_REM();
         case KW_STOP: case KW_END: return this.go_STOP();
         case KW_PAUSE: return this.go_PAUSE();
-        case KW_BEEP: this.beepFlag = true; this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
+        case KW_BEEP: {
+          this.beepFlag = true;
+          // BEEP takes no arguments — skip to next : or end of line
+          let c; while ((c = this.curByte()) !== 0x3A && c !== NL && c !== 0) this.advance();
+          this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
+        }
         case KW_USING: return this.go_USING();
+        case KW_CLEAR:
+          this.numVars.fill(0); this.strVars.fill('');
+          this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
+        case KW_CONT:
+          // Continue after STOP — resume from saved position
+          if (this._stoppedLine >= 0) {
+            this.currentLine = this._stoppedLine;
+            this.txtpos = this._stoppedPos || 0;
+            this.running = true;
+            this.nextStep = 'RUN_NEXT_STATEMENT';
+          } else {
+            this.nextStep = 'QWHAT';
+          }
+          return 'OK';
+        case KW_THEN: this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
         case KW_DEGREE: this.angleMode = 'DEGREE'; this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
         case KW_RADIAN: this.angleMode = 'RADIAN'; this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
         case KW_GRAD: this.angleMode = 'GRAD'; this.nextStep = 'RUN_NEXT_STATEMENT'; return 'OK';
@@ -1193,6 +1270,23 @@ class TinyBasic {
       if (nextB === 0x3D) {
         return this.go_LET();
       }
+      if (nextB === 0x28) {
+        // Array variable — only treat as assignment if = follows the closing )
+        // e.g. A(3)=val is assignment, A(3) alone is expression
+        const savedP = this.getPos();
+        this.advance(); // skip variable letter
+        this.advance(); // skip (
+        let depth = 1;
+        while (depth > 0 && this.curByte() !== NL && this.curByte() !== 0) {
+          if (this.curByte() === 0x28) depth++;
+          else if (this.curByte() === 0x29) depth--;
+          this.advance();
+        }
+        this.skipSpaces();
+        const isAssign = this.curByte() === 0x3D;
+        this.setPos(savedP);
+        if (isAssign) return this.go_LET();
+      }
       // Otherwise treat as expression to evaluate
     }
 
@@ -1200,7 +1294,7 @@ class TinyBasic {
     if (this.currentLine < 0) {
       const val = this.expression();
       if (this.expType === 'ERROR') {
-        this.outputBuffer = (this.errorMsg || '1').padStart(16);
+        this.outputBuffer = ((this.errorMsg || '1') + '...............').padStart(24);
         this.nextStep = 'WARMSTART';
         this.running = false;
         return 'ERROR';
@@ -1243,10 +1337,30 @@ class TinyBasic {
         continue;
       }
 
+      // Inline USING: PRINT expr;USING "fmt";expr
+      if (b === KW_USING) {
+        this.advance();
+        this.skipSpaces();
+        if (this.curByte() === 0x22) {
+          this.advance();
+          let fmt = '';
+          while (this.curByte() !== 0x22 && this.curByte() !== NL) {
+            fmt += String.fromCharCode(this.curByte());
+            this.advance();
+          }
+          if (this.curByte() === 0x22) this.advance();
+          this.usingFormat = fmt;
+        }
+        this.skipSpaces();
+        if (this.curByte() === 0x3B) this.advance(); // skip ; after format
+        needNewline = false;
+        continue;
+      }
+
       // Expression
       const val = this.expression();
       if (this.expType === 'ERROR') {
-        this.outputBuffer = (this.errorMsg || '1').padStart(16);
+        this.outputBuffer = ((this.errorMsg || '1') + '...............').padStart(24);
         this.nextStep = 'WARMSTART';
         this.running = false;
         return 'ERROR';
@@ -1338,7 +1452,7 @@ class TinyBasic {
       return 'OK';
     }
 
-    // Array variable A(n)
+    // Array variable A(n) — on PC-1211, A(1)=A, A(2)=B, etc.
     if (this.curByte() === 0x28) {
       this.advance();
       const idx = Math.floor(this.expression());
@@ -1349,11 +1463,16 @@ class TinyBasic {
       this.advance();
       const val = this.expression();
       if (this.expType === 'ERROR') {
-        this.outputBuffer = (this.errorMsg || '1').padStart(16);
+        this.outputBuffer = ((this.errorMsg || '1') + '...............').padStart(24);
         this.nextStep = 'WARMSTART'; return 'ERROR';
       }
-      const ai = varIdx + idx;
+      const ai = varIdx + idx - 1;
       if (ai >= 0 && ai < 26) this.numVars[ai] = val;
+      if (this.currentLine < 0) {
+        this.outputBuffer = this.formatNum(val).padStart(24);
+        this.nextStep = 'WARMSTART';
+        return 'PRINT';
+      }
       this.nextStep = 'RUN_NEXT_STATEMENT';
       return 'OK';
     }
@@ -1363,7 +1482,7 @@ class TinyBasic {
     this.advance();
     const val = this.expression();
     if (this.expType === 'ERROR') {
-      this.outputBuffer = (this.errorMsg || '1').padStart(16);
+      this.outputBuffer = ((this.errorMsg || '1') + '...............').padStart(24);
       this.nextStep = 'WARMSTART'; return 'ERROR';
     }
     this.numVars[varIdx] = val;
@@ -1380,7 +1499,7 @@ class TinyBasic {
   go_IF() {
     const val = this.expression();
     if (this.expType === 'ERROR') {
-      this.outputBuffer = (this.errorMsg || '1').padStart(16);
+      this.outputBuffer = ((this.errorMsg || '1') + '...............').padStart(24);
       this.nextStep = 'WARMSTART'; return 'ERROR';
     }
     this.skipSpaces();
@@ -1611,6 +1730,96 @@ class TinyBasic {
     return 'OK';
   }
 
+  go_CSAVE() {
+    this._pendingCSAVE = true;
+    this.outputBuffer = this.programEnd + ' BYTES';
+    this.nextStep = 'WARMSTART';
+    return 'OK';
+  }
+
+  doCSAVEDownload() {
+    this._pendingCSAVE = false;
+    // Build plain-text .bas from program memory
+    let text = '';
+    let pos = 0;
+    while (pos < this.programEnd) {
+      const ln = (this.program[pos] << 8) | this.program[pos + 1];
+      const len = this.program[pos + 2];
+      const line = this.expandTokens(this.program, pos + 3, pos + len, false);
+      text += ln + ' ' + line.trimEnd() + '\n';
+      pos += len;
+    }
+    // Trigger browser download
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'program.bas';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  go_CLOAD() {
+    this.inputMode = false;
+    this.outputBuffer = 'LOADING';
+    this.nextStep = 'CLOAD_WAIT';
+    this._pendingCLOAD = true;
+    return 'OK';
+  }
+
+  doCLOADFilePick() {
+    this._pendingCLOAD = false;
+    const input = document.getElementById('cload-file');
+    input.value = ''; // Reset so same file can be re-selected
+    const onChange = () => {
+      input.removeEventListener('change', onChange);
+      const file = input.files[0];
+      if (!file) {
+        this.nextStep = 'WARMSTART';
+        if (this.pc1211) this.pc1211.waitForKey = true;
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        // Clear current program
+        this.program.fill(0);
+        this.programEnd = 0;
+        // Parse and insert lines
+        const lines = reader.result.split(/\r?\n/);
+        let loaded = 0;
+        for (const raw of lines) {
+          const line = raw.trim();
+          if (!line || line.startsWith("'")) continue;
+          // Parse line number
+          let i = 0;
+          let lineNum = 0;
+          let hasNum = false;
+          while (i < line.length && line[i] >= '0' && line[i] <= '9') {
+            lineNum = lineNum * 10 + (line.charCodeAt(i) - 0x30);
+            i++;
+            hasNum = true;
+          }
+          if (!hasNum || lineNum < 1) continue;
+          // Skip space after line number
+          while (i < line.length && line[i] === ' ') i++;
+          const rest = line.substring(i);
+          if (rest.length === 0) continue;
+          const tokens = this.tokenize(rest);
+          this.insertLine(lineNum, tokens);
+          loaded++;
+        }
+        this.outputBuffer = (loaded + ' LINES').padStart(16);
+        this.nextStep = 'WARMSTART';
+        if (this.pc1211) this.pc1211.waitForKey = true;
+      };
+      reader.readAsText(file);
+    };
+    input.addEventListener('change', onChange);
+    input.click();
+  }
+
   go_MEM() {
     const free = this.program.length - this.programEnd - 100;
     this.outputBuffer = free + ' BYTES FREE';
@@ -1629,22 +1838,45 @@ class TinyBasic {
   }
 
   go_STOP() {
+    // Save position for CONT
+    this._stoppedLine = this.currentLine;
+    this._stoppedPos = this.txtpos;
     this.running = false;
     this.nextStep = 'WARMSTART';
     return 'STOP';
   }
 
   go_PAUSE() {
-    // PAUSE: display expression value, wait ~1.3s, then continue
+    // PAUSE: like PRINT but displays for ~1.3s then continues
     this.skipSpaces();
-    if (this.curByte() !== NL && this.curByte() !== 0 && this.curByte() !== 0x3A) {
+    let output = '';
+    while (true) {
+      this.skipSpaces();
+      const b = this.curByte();
+      if (b === NL || b === 0 || b === 0x3A) break;
+      if (b === 0x3B) { // ;
+        this.advance();
+        continue;
+      }
+      if (b === 0x2C) { // ,
+        output += '\t';
+        this.advance();
+        continue;
+      }
       const val = this.expression();
+      if (this.expType === 'ERROR') {
+        this.outputBuffer = ((this.errorMsg || '1') + '...............').padStart(24);
+        this.nextStep = 'WARMSTART';
+        this.running = false;
+        return 'ERROR';
+      }
       if (this.expType === 'STRING') {
-        this.outputBuffer = this._lastStr;
+        output += this._lastStr;
       } else {
-        this.outputBuffer = this.formatNum(val);
+        output += this.formatNum(val);
       }
     }
+    this.outputBuffer = output;
     this.pauseFlag = true;
     this.pauseTimer = 0;
     this.nextStep = 'RUN_NEXT_STATEMENT';
@@ -1669,8 +1901,17 @@ class TinyBasic {
 
   breakProgram() {
     if (this.running) {
+      // Save position for CONT
+      this._stoppedLine = this.currentLine;
+      this._stoppedPos = this.txtpos;
+      const cl = this.currentLine;
+      if (cl >= 0) {
+        const ln = (this.program[cl] << 8) | this.program[cl + 1];
+        this.outputBuffer = 'BREAK AT ' + ln;
+      } else {
+        this.outputBuffer = 'BREAK';
+      }
       this.running = false;
-      this.outputBuffer = 'BREAK';
       this.nextStep = 'WARMSTART';
     }
   }
@@ -1680,23 +1921,26 @@ class TinyBasic {
 class PC1211 {
   constructor() {
     this.basic = new TinyBasic();
+    this.basic.pc1211 = this;
     this.lcd = new LCD(document.getElementById('lcd'));
     this.mode = 'RUN'; // RUN, PRO, RESERVE, DEF
     this.basic.proMode = false;
     this.shiftActive = false;
-    this.inputBuffer = '';
-    this.cursorPos = 0;
+    this.inputBuffer = [];  // byte array: regular chars as ASCII, keywords as token bytes (0x80+)
+    this.cursorPos = 0;     // byte index into inputBuffer
     this.displayChars = [];
     this.waitForKey = false;
     this.listLines = [];
     this.listIdx = 0;
     this.powered = true;
     this._lastProgramOutput = '';
+    // DEF key storage: 26 slots (A-Z), each holds a tokenized byte array
+    this.defKeys = new Array(26).fill(null).map(() => []);
 
     // Shift map
     this.shiftMap = {
       'Q':'!', 'W':'"', 'E':'#', 'R':'$', 'T':'%',
-      'Y':'&', 'U':'?', 'I':':', 'O':',', 'P':';',
+      'Y':'\x1B', 'U':'?', 'I':':', 'O':',', 'P':';',
       '(':'<', ')':'>', '/':'^', '.':' '
     };
 
@@ -1715,16 +1959,53 @@ class PC1211 {
     };
   }
 
+  // Expand byte array to display string (tokens → keyword text, special chars → unicode)
+  expandBuffer(buf) {
+    let s = '';
+    for (let i = 0; i < buf.length; i++) {
+      const b = buf[i];
+      if (b === KF_EXP) {
+        s += '\x1A'; // EXP display character
+      } else if (b >= 0x80 && (b - 0x80) < KEYWORDS.length) {
+        s += KEYWORDS[b - 0x80] + ' ';
+      } else if (b === 0x18) {
+        s += '\u221A'; // √
+      } else if (b === 0x19) {
+        s += '\u03C0'; // π
+      } else {
+        s += String.fromCharCode(b);
+      }
+    }
+    return s;
+  }
+
+  // Map byte index to display column position
+  byteToDisplayPos(bytePos) {
+    let dp = 0;
+    for (let i = 0; i < bytePos && i < this.inputBuffer.length; i++) {
+      const b = this.inputBuffer[i];
+      if (b === KF_EXP) {
+        dp += 1; // EXP displays as single glyph character
+      } else if (b >= 0x80 && (b - 0x80) < KEYWORDS.length) {
+        dp += KEYWORDS[b - 0x80].length + 1; // keyword + trailing space
+      } else {
+        dp += 1;
+      }
+    }
+    return dp;
+  }
+
   switchMode() {
     const modes = ['RUN', 'PRO', 'RESERVE', 'DEF'];
     const idx = modes.indexOf(this.mode);
     this.mode = modes[(idx + 1) % 4];
     this.basic.proMode = (this.mode === 'PRO');
-    this.inputBuffer = '';
+    this.inputBuffer = [];
     this.cursorPos = 0;
     this.basic.outputBuffer = '';
     this.waitForKey = false;
-    if (this.mode === 'RUN') {
+    this._proLineIdx = null;
+    if (this.mode === 'RUN' || this.mode === 'PRO' || this.mode === 'RESERVE') {
       this.basic.nextStep = 'PROMPT';
       this.basic.inputMode = true;
     }
@@ -1757,19 +2038,42 @@ class PC1211 {
     // Handle ON
     if (key === 'ON') {
       this.powered = true;
-      this.basic.reset();
+      // Save position for CONT and show BREAK AT line
+      const wasRunning = this.basic.running;
+      const cl = this.basic.currentLine;
+      let breakMsg = '';
+      if (wasRunning && cl >= 0) {
+        this.basic._stoppedLine = cl;
+        this.basic._stoppedPos = this.basic.txtpos;
+        const ln = (this.basic.program[cl] << 8) | this.basic.program[cl + 1];
+        breakMsg = 'BREAK AT ' + ln;
+      }
+      // Stop program but preserve program memory and stack (for CONT)
+      this.basic.running = false;
+      this.basic.currentLine = -1;
+      this.basic.errorMsg = '';
+      this.basic.inputMode = false;
+      this.basic.pauseFlag = false;
       this.basic.nextStep = 'WARMSTART';
-      this.inputBuffer = '';
+      this.inputBuffer = [];
       this.cursorPos = 0;
       this.mode = 'RUN';
+      this.basic.proMode = false;
       this.updateIndicators();
+      if (breakMsg) {
+        this.basic.outputBuffer = breakMsg;
+        this.waitForKey = true;
+      } else {
+        this.basic.outputBuffer = '';
+        this.waitForKey = false;
+      }
       return;
     }
 
     // Handle OFF
     if (key === 'OFF') {
       this.powered = false;
-      this.inputBuffer = '';
+      this.inputBuffer = [];
       this.basic.outputBuffer = '';
       this.lcd.indicators = {};
       return;
@@ -1784,11 +2088,27 @@ class PC1211 {
         return;
       }
       if (this.basic.nextStep === 'WARMSTART' || this.basic.nextStep === 'PROMPT') {
-        // Restore previous input for editing
         this.basic.inputMode = true;
         this.basic.nextStep = 'GETLN';
-        this.inputBuffer = this._lastInput || '';
-        this.cursorPos = 0;
+        if (key === 'ENTER') {
+          this.inputBuffer = [];
+          this.cursorPos = 0;
+        } else if (key === 'RIGHT') {
+          // Recall previous input, cursor at start
+          this.inputBuffer = this._lastInput ? [...this._lastInput] : [];
+          this.cursorPos = 0;
+        } else if (key === 'LEFT') {
+          // Recall previous input, cursor at end
+          this.inputBuffer = this._lastInput ? [...this._lastInput] : [];
+          this.cursorPos = this.inputBuffer.length;
+        } else if (key.length === 1) {
+          // Printable character: start fresh with that character
+          this.inputBuffer = [key.toUpperCase().charCodeAt(0)];
+          this.cursorPos = 1;
+        } else {
+          this.inputBuffer = [];
+          this.cursorPos = 0;
+        }
       }
       return;
     }
@@ -1807,14 +2127,40 @@ class PC1211 {
       } else if (key === 'SQR') {
         ch = '^';
       }
-      // DEF mode: shift+letter = RUN "letter"
-      if (this.mode === 'DEF' && key.length === 1 && key >= 'A' && key <= 'Z') {
-        this.inputBuffer = 'RUN "' + key + '"';
+      // DEF mode: shift+letter = RUN "letter" (A/Z rows only, not Q row)
+      const DEF_KEYS = 'ASDFGHJKLZXCVBNM';
+      if (this.mode === 'DEF' && key.length === 1 && DEF_KEYS.includes(key)) {
+        this.inputBuffer = this.basic.tokenize('RUN "' + key + '"');
         this.mode = 'RUN';
         this.submitInput();
         this.shiftActive = false;
         this.updateIndicators();
         return;
+      }
+      // RESERVE mode: shift+letter = define key (A/Z rows only)
+      if (this.mode === 'RESERVE' && key.length === 1 && DEF_KEYS.includes(key)) {
+        this._definingKey = key.charCodeAt(0) - 0x41;
+        this.inputBuffer = [];
+        this.cursorPos = 0;
+        this.basic.outputBuffer = key + ':';
+        this.basic.inputMode = true;
+        this.basic.nextStep = 'INPUT_WAIT';
+        this.shiftActive = false;
+        this.updateIndicators();
+        return;
+      }
+      // RUN/PRO mode: shift+letter = insert defined key text (A/Z rows only, only if key is defined)
+      if ((this.mode === 'RUN' || this.mode === 'PRO') && key.length === 1 && DEF_KEYS.includes(key)) {
+        const idx = key.charCodeAt(0) - 0x41;
+        const def = this.defKeys[idx];
+        if (def && def.length > 0) {
+          this.inputBuffer.splice(this.cursorPos, 0, ...def);
+          this.cursorPos += def.length;
+          this.shiftActive = false;
+          this.updateIndicators();
+          return;
+        }
+        // No DEF key defined — fall through to insert shifted character
       }
       this.shiftActive = false;
       this.updateIndicators();
@@ -1823,9 +2169,43 @@ class PC1211 {
     // Input mode
     if (this.basic.inputMode || this.basic.nextStep === 'GETLN' || this.basic.nextStep === 'INPUT_WAIT') {
       if (ch === 'ENTER') {
+        // RESERVE mode: store defined key (tokenize the input)
+        if (this.mode === 'RESERVE' && this._definingKey !== undefined) {
+          this.defKeys[this._definingKey] = this.basic.tokenize(this.expandBuffer(this.inputBuffer));
+          this._definingKey = undefined;
+          this.inputBuffer = [];
+          this.cursorPos = 0;
+          this.basic.outputBuffer = '';
+          this.basic.inputMode = false;
+          this.basic.nextStep = 'PROMPT';
+          return;
+        }
+        // Check for CLOAD/CSAVE before submitting — must open file picker
+        // in the direct user-gesture call stack for the browser to allow it
+        const cmd = this.expandBuffer(this.inputBuffer).trim().toUpperCase();
+        if (cmd === 'CLOAD') {
+          this.inputBuffer = [];
+          this.cursorPos = 0;
+          this.basic.inputMode = false;
+          this.basic.outputBuffer = 'LOADING';
+          this.basic.nextStep = 'CLOAD_WAIT';
+          this.basic.doCLOADFilePick();
+          return;
+        }
+        if (cmd === 'CSAVE') {
+          this.inputBuffer = [];
+          this.cursorPos = 0;
+          this.basic.inputMode = false;
+          this.basic.doCSAVEDownload();
+          this.basic.outputBuffer = this.basic.programEnd + ' BYTES';
+          this.basic.nextStep = 'WARMSTART';
+          this.waitForKey = true;
+          return;
+        }
+        this._proLineIdx = null;
         this.submitInput();
       } else if (ch === 'CLR') {
-        this.inputBuffer = '';
+        this.inputBuffer = [];
         this.cursorPos = 0;
       } else if (ch === 'LEFT') {
         if (this.cursorPos > 0) this.cursorPos--;
@@ -1835,32 +2215,37 @@ class PC1211 {
         if (this.mode === 'PRO') this.listPrev();
       } else if (ch === 'DOWN') {
         if (this.mode === 'PRO') this.listNext();
+      } else if (ch === 'BS') {
+        // Backspace: delete byte before cursor (token or char)
+        if (this.cursorPos > 0) {
+          this.inputBuffer.splice(this.cursorPos - 1, 1);
+          this.cursorPos--;
+        }
       } else if (ch === 'DEL') {
-        // Delete char at cursor, shift right text left
+        // Delete byte at cursor
         if (this.cursorPos < this.inputBuffer.length) {
-          this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos) +
-                            this.inputBuffer.substring(this.cursorPos + 1);
+          this.inputBuffer.splice(this.cursorPos, 1);
         }
       } else if (ch === 'INS') {
-        // Toggle insert mode (simplified: insert a space)
-        this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos) + ' ' +
-                          this.inputBuffer.substring(this.cursorPos);
+        // Insert a space at cursor
+        this.inputBuffer.splice(this.cursorPos, 0, 0x20);
       } else if (ch === 'SQR') {
-        this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos) + '\u221A' +
-                          this.inputBuffer.substring(this.cursorPos);
+        this.inputBuffer.splice(this.cursorPos, 0, 0x18);
         this.cursorPos++;
       } else if (ch === 'PI') {
-        this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos) + '\u03C0' +
-                          this.inputBuffer.substring(this.cursorPos);
+        this.inputBuffer.splice(this.cursorPos, 0, 0x19);
+        this.cursorPos++;
+      } else if (ch === 'EXP') {
+        this.inputBuffer.splice(this.cursorPos, 0, KF_EXP);
         this.cursorPos++;
       } else if (ch.length === 1) {
-        // Regular character
+        // Regular character — store as byte
+        const code = ch.charCodeAt(0);
         if (this.cursorPos < this.inputBuffer.length) {
           // Overwrite mode
-          this.inputBuffer = this.inputBuffer.substring(0, this.cursorPos) + ch +
-                            this.inputBuffer.substring(this.cursorPos + 1);
+          this.inputBuffer[this.cursorPos] = code;
         } else {
-          this.inputBuffer += ch;
+          this.inputBuffer.push(code);
         }
         this.cursorPos++;
       }
@@ -1869,11 +2254,19 @@ class PC1211 {
 
   submitInput() {
     // Save input for recall after result display
-    this._lastInput = this.inputBuffer;
-    let line = this.inputBuffer;
-    // Replace special characters with tokens for the interpreter
-    line = line.replace(/\u221A/g, '\x18'); // √ → SQR char
-    line = line.replace(/\u03C0/g, '\x19'); // π → PI char
+    this._lastInput = [...this.inputBuffer];
+    // Expand byte array to string for the BASIC interpreter
+    // Tokens are expanded to keyword text (GETLN_END will re-tokenize)
+    // Special chars 0x18/0x19 stay as their byte values (not unicode)
+    let line = '';
+    for (let i = 0; i < this.inputBuffer.length; i++) {
+      const b = this.inputBuffer[i];
+      if (b >= 0x80 && (b - 0x80) < KEYWORDS.length) {
+        line += KEYWORDS[b - 0x80] + ' ';
+      } else {
+        line += String.fromCharCode(b);
+      }
+    }
 
     if (this.basic.nextStep === 'GETLN') {
       this.basic.inputBuffer = line;
@@ -1882,17 +2275,58 @@ class PC1211 {
       this.basic.inputBuffer = line;
       this.basic.nextStep = 'INPUT_DONE';
     }
-    this.inputBuffer = '';
+    this.inputBuffer = [];
     this.cursorPos = 0;
   }
 
   listNext() {
     // In PRO mode, navigate to next program line
-    // Simplified: submit current line and prompt for next
+    const offsets = this.getLineOffsets();
+    if (offsets.length === 0) return;
+    if (this._proLineIdx === undefined || this._proLineIdx === null) {
+      this._proLineIdx = 0;
+    } else {
+      this._proLineIdx = Math.min(this._proLineIdx + 1, offsets.length - 1);
+    }
+    this.showProLine(offsets[this._proLineIdx]);
   }
 
   listPrev() {
     // In PRO mode, navigate to previous program line
+    const offsets = this.getLineOffsets();
+    if (offsets.length === 0) return;
+    if (this._proLineIdx === undefined || this._proLineIdx === null) {
+      this._proLineIdx = offsets.length - 1;
+    } else {
+      this._proLineIdx = Math.max(this._proLineIdx - 1, 0);
+    }
+    this.showProLine(offsets[this._proLineIdx]);
+  }
+
+  getLineOffsets() {
+    const offsets = [];
+    let pos = 0;
+    while (pos < this.basic.programEnd) {
+      offsets.push(pos);
+      pos += this.basic.program[pos + 2];
+    }
+    return offsets;
+  }
+
+  showProLine(pos) {
+    const ln = (this.basic.program[pos] << 8) | this.basic.program[pos + 1];
+    const len = this.basic.program[pos + 2];
+    // Build byte array: line number digits + ':' as char bytes, then raw tokenized program bytes
+    const prefix = ln + ' ';
+    this.inputBuffer = [];
+    for (let i = 0; i < prefix.length; i++) {
+      this.inputBuffer.push(prefix.charCodeAt(i));
+    }
+    // Copy raw tokenized bytes from program memory (skip NL at end)
+    for (let i = pos + 3; i < pos + len - 1; i++) {
+      this.inputBuffer.push(this.basic.program[i]);
+    }
+    this.cursorPos = 0;
   }
 
   buildDisplay() {
@@ -1900,22 +2334,25 @@ class PC1211 {
     let cPos = -1;
 
     if (this.basic.inputMode || this.basic.nextStep === 'GETLN' || this.basic.nextStep === 'INPUT_WAIT') {
-      // Show input buffer with cursor
+      // Expand byte array to display text and map cursor position
+      const expanded = this.expandBuffer(this.inputBuffer);
+      const displayCursorPos = this.byteToDisplayPos(this.cursorPos);
+
       if (this.basic.nextStep === 'INPUT_WAIT') {
-        text = this.basic.outputBuffer + this.inputBuffer;
-        cPos = this.basic.outputBuffer.length + this.cursorPos;
+        text = this.basic.outputBuffer + expanded;
+        cPos = this.basic.outputBuffer.length + displayCursorPos;
       } else if (this.basic.nextStep === 'GETLN') {
         if (this.inputBuffer.length === 0 && this.mode !== 'PRO') {
           // Show > prompt when empty, no cursor
           text = '>';
           cPos = -1;
         } else {
-          text = this.inputBuffer;
-          cPos = this.cursorPos;
+          text = expanded;
+          cPos = displayCursorPos;
         }
       } else {
-        text = this.inputBuffer;
-        cPos = this.cursorPos;
+        text = expanded;
+        cPos = displayCursorPos;
       }
     } else if (this.basic.outputBuffer) {
       text = this.basic.outputBuffer;
@@ -1963,22 +2400,27 @@ class PC1211 {
       // Handle PAUSE timer
       if (this.basic.pauseFlag) {
         this.basic.pauseTimer += dt;
-        if (this.basic.pauseTimer >= 1300) {
+        if (this.basic.pauseTimer >= 1000) {
           this.basic.pauseFlag = false;
           this.basic.outputBuffer = '';
         }
       } else {
         const maxSteps = 500; // Steps per frame
         for (let i = 0; i < maxSteps; i++) {
+          const cl = this.basic.currentLine;
+          const st = this.basic.nextStep;
           const result = this.basic.step();
+          if (result === 'ERROR') {
+            const ln = cl >= 0 ? (this.basic.program[cl] << 8 | this.basic.program[cl+1]) : -1;
+            console.log(`ERROR at line ${ln} state=${st} output=${this.basic.outputBuffer}`);
+          }
           if (result === 'WAITING' || result === 'PAUSE') break;
           if (result === 'INPUT') break; // Wait for user input
           if (result === 'PRINT') {
             if (this.basic.running && this.basic.currentLine >= 0) {
-              // In a running program: show output, keep running
-              // (output stays on LCD until next PRINT or program end)
-              this._lastProgramOutput = this.basic.outputBuffer;
-              continue;
+              // In a running program: show output, wait for keypress
+              this.waitForKey = true;
+              break;
             } else {
               // Direct mode: wait for keypress
               this.waitForKey = true;
@@ -2114,7 +2556,7 @@ const KEY_MAP = [
   // Right numpad row 4: 0 . Exp + ►
   [67.5, 85.5, 4.3, 6.5, '0'],
   [73.7, 85.5, 4.3, 6.5, '.'],
-  [79.9, 85.5, 4.3, 6.5, 'E'],
+  [79.9, 85.5, 4.3, 6.5, 'EXP'],
   [86.5, 85.5, 4.3, 6.5, '+'],
   [92.7, 85.5, 4.7, 6.5, 'RIGHT'],
 ];
@@ -2164,7 +2606,7 @@ function setupKeyboardInput() {
     if (e.key === 'Escape') { key = 'BRK'; e.preventDefault(); }
     else if (e.key === 'F1') { key = 'MODE'; e.preventDefault(); }
     else if (e.key === 'Enter') { key = 'ENTER'; e.preventDefault(); }
-    else if (e.key === 'Backspace') { key = 'DEL'; e.preventDefault(); }
+    else if (e.key === 'Backspace') { key = 'BS'; e.preventDefault(); }
     else if (e.key === 'Delete') { key = 'CLR'; e.preventDefault(); }
     else if (e.key === 'ArrowLeft') { key = 'LEFT'; e.preventDefault(); }
     else if (e.key === 'ArrowRight') { key = 'RIGHT'; e.preventDefault(); }
