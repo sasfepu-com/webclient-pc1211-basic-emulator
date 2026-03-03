@@ -20,6 +20,10 @@ The Sharp PC-1211 (1980) was the world's first pocket computer with a BASIC inte
 
 **Functions:** SIN, COS, TAN, ASN, ACS, ATN, LN, LOG, EXP, ABS, SGN, INT, DEG, DMS, SQR, RND, PI
 
+## Live Demo
+
+Try the emulator live at [https://sasfepu.com/model/168](https://sasfepu.com/model/168) — includes a cassette deck with pre-loaded BASIC programs.
+
 ## Quick Start
 
 Open `index.html` in any modern browser. Type `PRINT 2+2` and press Enter.
